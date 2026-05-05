@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#05060a" />
+<title>Multiverse.Sim</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #05060a; color: #c5f5ff;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; user-select: none;
+    -webkit-user-select: none; touch-action: none; overscroll-behavior: none; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; touch-action: none; }
+
+  /* COMMON */
+  .panel { background: rgba(0,0,0,0.78); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(14, 116, 144, 0.4); }
+  .glow-pink { box-shadow: 0 0 12px rgba(244, 114, 182, 0.3); }
+  button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+  input[type=range] { width: 100%; height: 6px; accent-color: #f472b6; cursor: pointer; }
+  input[type=checkbox] { width: 18px; height: 18px; accent-color: #f472b6; cursor: pointer; }
+
+  /* TOP BAR */
+  .topbar { position: absolute; top: 0; left: 0; right: 0; z-index: 10; display: flex; justify-content: space-between;
+    align-items: center; padding: 8px 12px; background: linear-gradient(to bottom, rgba(0,0,0,0.95), transparent);
+    pointer-events: none; }
+  .brand { display: flex; align-items: center; gap: 8px; pointer-events: auto; }
+  .brand-dot { width: 10px; height: 10px; border-radius: 50%; background: #f72585; box-shadow: 0 0 10px #f72585; animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .brand-text { font-size: 11px; letter-spacing: 0.25em; color: #f5b3d4; }
+  .stats { display: flex; gap: 5px; pointer-events: auto; font-size: 10px; flex-wrap: wrap; justify-content: flex-end; }
+  .stat { padding: 4px 8px; border-radius: 3px; background: rgba(8, 47, 73, 0.7); border: 1px solid rgba(14, 116, 144, 0.4); }
+  .stat.pink { background: rgba(76, 5, 25, 0.7); border-color: rgba(157, 23, 77, 0.4); }
+  .stat.amber { background: rgba(69, 26, 3, 0.7); border-color: rgba(180, 83, 9, 0.4); }
+  .stat .lbl { opacity: 0.6; }
+
+  /* CURRENT PILL */
+  .pill { position: absolute; top: 44px; left: 50%; transform: translateX(-50%); z-index: 10;
+    padding: 6px 14px; border-radius: 999px; display: flex; align-items: center; gap: 8px; font-size: 11px; }
+  .pill-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .pill-name { color: #fbcfe8; min-width: 60px; text-align: center; }
+  .pill-hint { color: rgba(103, 232, 249, 0.5); font-size: 9px; }
+
+  /* SIDE BUTTONS — vertical column right edge */
+  .sidebtns { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); z-index: 10;
+    display: flex; flex-direction: column; gap: 8px; }
+  .sidebtn { width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; transition: transform 0.1s; }
+  .sidebtn:active { transform: scale(0.9); }
+  .sidebtn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round; }
+
+  /* BOTTOM (mobile only) */
+  .bottom-mobile { position: absolute; bottom: 0; left: 0; right: 0; z-index: 10; }
+  .pop-bar { padding: 5px 10px; background: rgba(0,0,0,0.85); border-top: 1px solid rgba(14, 116, 144, 0.4);
+    font-size: 9px; display: flex; flex-wrap: wrap; gap: 1px 9px; max-height: 32px; overflow: hidden; align-items: center; }
+  .pop-bar .lbl { color: rgba(103, 232, 249, 0.6); letter-spacing: 0.15em; }
+  .pop-bar .kv .k { color: rgba(103, 232, 249, 0.55); }
+  .tabs { display: flex; background: rgba(0,0,0,0.95); border-top: 1px solid rgba(14, 116, 144, 0.5); padding-bottom: env(safe-area-inset-bottom, 0); }
+  .tab { flex: 1; padding: 11px 0; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    border-top: 2px solid transparent; color: rgba(103, 232, 249, 0.65); transition: all 0.15s; }
+  .tab.active { border-top-color: #f472b6; background: rgba(76, 5, 25, 0.3); color: #fbcfe8; }
+  .tab svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; }
+  .tab span { font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; }
+
+  /* DRAWER (mobile) */
+  .drawer { position: absolute; bottom: 80px; left: 0; right: 0; z-index: 20;
+    background: rgba(0,0,0,0.95); backdrop-filter: blur(12px); border-top: 1px solid rgba(14, 116, 144, 0.5);
+    max-height: 58vh; overflow-y: auto; padding: 12px; display: none; }
+  .drawer.open { display: block; animation: slideup 0.2s ease-out; }
+  @keyframes slideup { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .drawer-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+    position: sticky; top: 0; background: rgba(0,0,0,0.95); padding-bottom: 6px; z-index: 1; }
+  .drawer-title { color: rgba(103, 232, 249, 0.8); letter-spacing: 0.25em; font-size: 10px; }
+  .close-x { width: 26px; height: 26px; border-radius: 50%; background: rgba(8, 47, 73, 0.5);
+    display: flex; align-items: center; justify-content: center; color: #67e8f9; }
+  .close-x svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; }
+
+  /* DESKTOP PANELS */
+  .left-panel, .right-panel { display: none; }
+  @media (min-width: 768px) {
+    .left-panel { display: block; position: absolute; left: 12px; top: 70px; bottom: 12px; z-index: 10;
+      width: 240px; padding: 12px; border-radius: 4px; overflow-y: auto; }
+    .right-panel { display: block; position: absolute; right: 12px; top: 70px; z-index: 10;
+      width: 250px; padding: 12px; border-radius: 4px; max-height: calc(100vh - 90px); overflow-y: auto; }
+    .sidebtns { right: auto; left: 50%; bottom: 16px; top: auto; transform: translateX(-50%); flex-direction: row; }
+    .pop-bar-desktop { display: flex !important; }
+    .bottom-mobile { display: none; }
+    .pill { top: 56px; }
+  }
+
+  /* DESKTOP POP BAR */
+  .pop-bar-desktop { display: none; position: absolute; bottom: 12px; left: 280px; right: 290px; z-index: 10;
+    padding: 6px 12px; border-radius: 4px; font-size: 10px; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
+
+  /* PALETTE */
+  .group-label { font-size: 9px; letter-spacing: 0.2em; color: rgba(34, 211, 238, 0.65); margin-bottom: 5px; text-transform: uppercase; }
+  .group-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-bottom: 10px; }
+  @media (min-width: 768px) { .group-grid { grid-template-columns: repeat(3, 1fr); } }
+  .pcard { padding: 7px 3px; border-radius: 4px; background: rgba(8, 47, 73, 0.3); border: 1px solid rgba(14, 116, 144, 0.4);
+    transition: all 0.1s; }
+  .pcard:active { transform: scale(0.94); }
+  .pcard.sel { border-color: #f472b6; background: rgba(76, 5, 25, 0.4); box-shadow: 0 0 8px rgba(244, 114, 182, 0.3); }
+  .pcard-dot { width: 12px; height: 12px; border-radius: 50%; margin: 0 auto 3px; }
+  .pcard-sym { font-size: 10px; text-align: center; color: #c5f5ff; }
+  .pcard-name { font-size: 8px; text-align: center; color: rgba(103, 232, 249, 0.65); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+
+  /* SLIDER */
+  .slider-block { padding: 8px 10px; background: rgba(8, 47, 73, 0.25); border-radius: 4px; margin-bottom: 8px; }
+  .slider-head { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 4px; }
+  .slider-head .k { color: rgba(103, 232, 249, 0.7); }
+  .slider-head .v { color: #c5f5ff; }
+
+  /* TOGGLE */
+  .toggle-row { display: flex; justify-content: space-between; align-items: center; width: 100%;
+    padding: 8px 10px; background: rgba(8, 47, 73, 0.25); border-radius: 4px; margin-bottom: 5px; }
+  .toggle-row:active { background: rgba(8, 47, 73, 0.5); }
+  .toggle-row .lbl { color: #67e8f9; font-size: 11px; }
+  .toggle { width: 36px; height: 18px; border-radius: 999px; background: rgba(8, 47, 73, 1);
+    border: 1px solid rgba(14, 116, 144, 0.5); position: relative; transition: all 0.15s; }
+  .toggle.on { background: #f472b6; border-color: #f472b6; }
+  .toggle::after { content: ''; position: absolute; top: 1px; left: 1px; width: 14px; height: 14px;
+    border-radius: 50%; background: white; transition: transform 0.15s; }
+  .toggle.on::after { transform: translateX(18px); }
+
+  /* ACTIONS */
+  .actions { display: flex; gap: 5px; margin-bottom: 10px; }
+  .action-btn { flex: 1; padding: 8px 4px; border-radius: 4px; font-size: 10px; letter-spacing: 0.1em;
+    text-transform: uppercase; transition: all 0.1s; display: flex; align-items: center; justify-content: center; gap: 4px; }
+  .action-btn:active { transform: scale(0.95); }
+  .action-btn svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; }
+  .action-btn.cyan { background: rgba(8, 47, 73, 0.6); border: 1px solid rgba(14, 116, 144, 0.5); color: #c5f5ff; }
+  .action-btn.pink { background: rgba(76, 5, 25, 0.6); border: 1px solid rgba(157, 23, 77, 0.5); color: #fbcfe8; }
+  .action-btn.amber { background: rgba(69, 26, 3, 0.6); border: 1px solid rgba(180, 83, 9, 0.5); color: #fde68a; }
+
+  .anti-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px;
+    background: rgba(76, 5, 25, 0.2); border: 1px solid rgba(157, 23, 77, 0.4); border-radius: 4px; margin: 6px 0; }
+  .anti-row .lbl { color: #fbcfe8; font-size: 11px; }
+
+  .hint { padding: 8px 10px; background: rgba(8, 47, 73, 0.3); border: 1px solid rgba(14, 116, 144, 0.3);
+    border-radius: 4px; font-size: 10px; color: rgba(103, 232, 249, 0.75); line-height: 1.5; margin-top: 8px; }
+  .hint .head { color: #67e8f9; margin-bottom: 2px; font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; }
+
+  .preset-row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 10px; }
+  .preset { padding: 7px 5px; font-size: 10px; border-radius: 4px; background: rgba(76, 29, 149, 0.3);
+    border: 1px solid rgba(124, 58, 237, 0.4); color: #ddd6fe; transition: all 0.1s; }
+  .preset:active { transform: scale(0.95); }
+
+  /* HOVER TOOLTIP */
+  .tooltip { position: absolute; z-index: 15; padding: 8px 10px; border-radius: 4px;
+    background: rgba(0,0,0,0.92); border: 1px solid rgba(157, 23, 77, 0.5); font-size: 10px;
+    color: #fbcfe8; pointer-events: none; line-height: 1.5; max-width: 200px; }
+  .tooltip .name { color: #f472b6; font-size: 11px; margin-bottom: 3px; }
+  .tooltip .row { color: rgba(196, 181, 253, 0.85); }
+  .tooltip .row .k { color: rgba(103, 232, 249, 0.7); }
+
+  /* LOADING */
+  .loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 16px; background: #05060a; z-index: 100; color: #67e8f9;
+    font-size: 11px; letter-spacing: 0.25em; }
+  .spin { width: 32px; height: 32px; border: 2px solid rgba(103, 232, 249, 0.15);
+    border-top-color: #f472b6; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-msg { opacity: 0.6; font-size: 10px; }
+
+  /* EVENT LOG */
+  .event-log { position: absolute; left: 12px; bottom: 90px; z-index: 10; max-width: 240px;
+    font-size: 9px; pointer-events: none; }
+  @media (min-width: 768px) { .event-log { bottom: 50px; left: 280px; } }
+  .event { padding: 3px 8px; margin-bottom: 2px; border-radius: 3px; background: rgba(0,0,0,0.7);
+    border-left: 2px solid #f472b6; color: #fbcfe8; opacity: 0; animation: fadein 0.3s forwards, fadeout 0.5s 2.5s forwards; }
+  @keyframes fadein { to { opacity: 1; } }
+  @keyframes fadeout { to { opacity: 0; transform: translateX(-10px); } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="loading" id="loading">
+    <div class="spin"></div>
+    <div>INITIALIZING UNIVERSE</div>
+    <div class="loading-msg" id="loading-msg">checking engine</div>
+  </div>
+
+  <!-- TOP -->
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-dot"></div>
+      <div class="brand-text">MULTIVERSE.SIM</div>
+    </div>
+    <div class="stats">
+      <div class="stat"><span class="lbl">N </span><span id="stat-n">0</span></div>
+      <div class="stat pink"><span class="lbl">KE </span><span id="stat-ke">0</span></div>
+      <div class="stat amber"><span class="lbl">FPS </span><span id="stat-fps">60</span></div>
+    </div>
+  </div>
+
+  <!-- PILL -->
+  <div class="pill panel">
+    <div class="pill-dot" id="pill-dot"></div>
+    <span class="pill-name" id="pill-name">electron</span>
+    <span class="pill-hint" id="pill-hint">tap to spawn</span>
+  </div>
+
+  <!-- SIDE BUTTONS -->
+  <div class="sidebtns">
+    <button class="sidebtn panel" id="btn-play" title="play/pause">
+      <svg viewBox="0 0 24 24" id="icon-play"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+    </button>
+    <button class="sidebtn panel" id="btn-seed" title="reseed">
+      <svg viewBox="0 0 24 24" style="color:#fbcfe8"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+    </button>
+    <button class="sidebtn panel" id="btn-clear" title="clear">
+      <svg viewBox="0 0 24 24" style="color:#fde68a"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    </button>
+  </div>
+
+  <!-- DESKTOP LEFT PANEL -->
+  <div class="left-panel panel" id="left-panel">
+    <div class="drawer-head">
+      <div class="drawer-title">SPAWN PALETTE</div>
+    </div>
+    <div id="palette-desktop"></div>
+    <label class="anti-row">
+      <span class="lbl">antiparticle</span>
+      <input type="checkbox" id="anti-toggle-d" />
+    </label>
+    <div class="slider-block">
+      <div class="slider-head"><span class="k">init speed</span><span class="v" id="speed-val-d">2.0</span></div>
+      <input type="range" min="0" max="10" step="0.1" value="2" id="slider-speed-d" />
+    </div>
+    <div class="hint">
+      <div class="head">controls</div>
+      click → spawn · drag → orbit · wheel → zoom · hover → info
+    </div>
+  </div>
+
+  <!-- DESKTOP RIGHT PANEL -->
+  <div class="right-panel panel" id="right-panel">
+    <div class="drawer-head">
+      <div class="drawer-title">PHYSICS CONTROL</div>
+    </div>
+    <div class="actions">
+      <button class="action-btn pink" id="seed-atom-d">atoms</button>
+      <button class="action-btn pink" id="seed-bb-d">big bang</button>
+      <button class="action-btn pink" id="seed-anni-d">collide</button>
+    </div>
+    <div class="slider-block"><div class="slider-head"><span class="k">time scale</span><span class="v" id="t-val-d">1.00</span></div><input type="range" min="0" max="5" step="0.1" value="1" id="slider-time-d" /></div>
+    <div class="slider-block"><div class="slider-head"><span class="k">gravity ×</span><span class="v" id="g-val-d">1.00</span></div><input type="range" min="0" max="5" step="0.05" value="1" id="slider-grav-d" /></div>
+    <div class="slider-block"><div class="slider-head"><span class="k">EM ×</span><span class="v" id="em-val-d">1.00</span></div><input type="range" min="0" max="5" step="0.05" value="1" id="slider-em-d" /></div>
+    <div class="slider-block"><div class="slider-head"><span class="k">strong ×</span><span class="v" id="s-val-d">1.00</span></div><input type="range" min="0" max="3" step="0.05" value="1" id="slider-strong-d" /></div>
+    <button class="toggle-row" id="toggle-anni-d"><span class="lbl">annihilation</span><div class="toggle on"></div></button>
+    <button class="toggle-row" id="toggle-decay-d"><span class="lbl">particle decay</span><div class="toggle on"></div></button>
+    <button class="toggle-row" id="toggle-binding-d"><span class="lbl">atom binding</span><div class="toggle on"></div></button>
+    <button class="toggle-row" id="toggle-grid-d"><span class="lbl">3D space grid</span><div class="toggle on"></div></button>
+    <button class="toggle-row" id="toggle-trails-d"><span class="lbl">particle trails</span><div class="toggle"></div></button>
+  </div>
+
+  <!-- DESKTOP POP BAR -->
+  <div class="pop-bar-desktop panel" id="pop-desktop"><span class="lbl">POP</span><span style="color:rgba(8,145,178,0.7)">vacuum</span></div>
+
+  <!-- EVENT LOG -->
+  <div class="event-log" id="event-log"></div>
+
+  <!-- HOVER TOOLTIP -->
+  <div class="tooltip" id="tooltip" style="display:none"></div>
+
+  <!-- BOTTOM (mobile) -->
+  <div class="bottom-mobile">
+    <div class="pop-bar" id="pop-mobile"><span class="lbl">POP</span><span style="color:rgba(8,145,178,0.7)">vacuum</span></div>
+    <div class="tabs">
+      <button class="tab" data-tab="spawn">
+        <svg viewBox="0 0 24 24"><polygon points="12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.8 5.8 21 7 14 2 9.3 9 8.5 12 2"></polygon></svg>
+        <span>particles</span>
+      </button>
+      <button class="tab" data-tab="control">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24"></path></svg>
+        <span>physics</span>
+      </button>
+      <button class="tab" data-tab="presets">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
+        <span>presets</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- DRAWERS (mobile) -->
+  <div class="drawer" id="drawer-spawn">
+    <div class="drawer-head">
+      <div class="drawer-title">SPAWN PALETTE</div>
+      <button class="close-x" data-close><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+    </div>
+    <div id="palette-mobile"></div>
+    <label class="anti-row">
+      <span class="lbl">antiparticle</span>
+      <input type="checkbox" id="anti-toggle-m" />
+    </label>
+    <div class="slider-block">
+      <div class="slider-head"><span class="k">init speed</span><span class="v" id="speed-val-m">2.0</span></div>
+      <input type="range" min="0" max="10" step="0.1" value="2" id="slider-speed-m" />
+    </div>
+    <div class="hint"><div class="head">touch</div>tap → spawn · drag → orbit · pinch → zoom</div>
+  </div>
+
+  <div class="drawer" id="drawer-control">
+    <div class="drawer-head">
+      <div class="drawer-title">PHYSICS CONTROL</div>
+      <button class="close-x" data-close><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+    </div>
+    <div class="slider-block"><div class="slider-head"><span class="k">time scale</span><span class="v" id="t-val-m">1.00</span></div><input type="range" min="0" max="5" step="0.1" value="1" id="slider-time-m" /></div>
+    <div class="slider-block"><div class="slider-head"><span class="k">gravity ×</span><span class="v" id="g-val-m">1.00</span></div><input type="range" min="0" max="5" step="0.05" value="1" id="slider-grav-m" /></div>
+    <div class="slider-block"><div class="slider-head"><span class="k">EM ×</span><span class="v" id="em-val-m">1.00</span></div><input type="range" min="0" max="5" step="0.05" value="1" id="slider-em-m" /></div>
+    <div class="slider-block"><div class="slider-head"><span class="k">strong ×</span><span class="v" id="s-val-m">1.00</span></div><input type="range" min="0" max="3" step="0.05" value="1" id="slider-strong-m" /></div>
+    <button class="toggle-row" id="toggle-anni-m"><span class="lbl">annihilation</span><div class="toggle on"></div></button>
+    <button class="toggle-row" id="toggle-decay-m"><span class="lbl">particle decay</span><div class="toggle on"></div></button>
+    <button class="toggle-row" id="toggle-binding-m"><span class="lbl">atom binding</span><div class="toggle on"></div></button>
+    <button class="toggle-row" id="toggle-grid-m"><span class="lbl">3D space grid</span><div class="toggle on"></div></button>
+    <button class="toggle-row" id="toggle-trails-m"><span class="lbl">particle trails</span><div class="toggle"></div></button>
+  </div>
+
+  <div class="drawer" id="drawer-presets">
+    <div class="drawer-head">
+      <div class="drawer-title">SCENARIO PRESETS</div>
+      <button class="close-x" data-close><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+    </div>
+    <div class="preset-row">
+      <button class="preset" id="seed-atom-m">hydrogen atoms</button>
+      <button class="preset" id="seed-bb-m">big bang</button>
+      <button class="preset" id="seed-anni-m">matter/antimatter</button>
+      <button class="preset" id="seed-quark-m">quark soup</button>
+      <button class="preset" id="seed-photon-m">photon storm</button>
+      <button class="preset" id="seed-empty-m">vacuum</button>
+    </div>
+    <div class="hint"><div class="head">about</div>each preset wipes the universe and seeds a new initial condition. atom binding lets electrons orbit positive nuclei.</div>
+  </div>
+</div>
+
+<!-- OFFLINE LOADER -->
+<script>
+(async function loadThree() {
+  const KEY = 'three_r128_cache_v2';
+  const URL = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+  const loadingEl = document.getElementById('loading');
+  const msgEl = document.getElementById('loading-msg');
+  function inject(code) { const s = document.createElement('script'); s.textContent = code; document.head.appendChild(s); }
+  try {
+    const cached = localStorage.getItem(KEY);
+    if (cached && cached.length > 100000) {
+      msgEl.textContent = 'using cached engine';
+      inject(cached); window.dispatchEvent(new Event('three-ready')); return;
+    }
+  } catch(e) {}
+  msgEl.textContent = 'downloading engine ~600KB (first launch)';
+  try {
+    const res = await fetch(URL);
+    if (!res.ok) throw new Error('fetch failed');
+    const code = await res.text();
+    try { localStorage.setItem(KEY, code); } catch(e) {}
+    inject(code); window.dispatchEvent(new Event('three-ready'));
+  } catch (err) {
+    loadingEl.innerHTML = '<div style="color:#ff6b9d;text-align:center;padding:20px;line-height:1.6;letter-spacing:0.1em">CANNOT LOAD ENGINE<br/><br/><span style="font-size:10px;color:#67e8f9">connect to internet for first launch.<br/>after that it works fully offline.</span></div>';
+  }
+})();
+</script>
+
+<script>
+// ============================================================
+// STANDARD MODEL
+// ============================================================
+const SM = {
+  up:        { kind: "quark",  gen: 1, mass: 2.2,    charge:  2/3, spin: 0.5, color: 0xff4d6d, symbol: "u",  group: "quark" },
+  down:      { kind: "quark",  gen: 1, mass: 4.7,    charge: -1/3, spin: 0.5, color: 0xff8fa3, symbol: "d",  group: "quark" },
+  charm:     { kind: "quark",  gen: 2, mass: 1275,   charge:  2/3, spin: 0.5, color: 0xff006e, symbol: "c",  group: "quark" },
+  strange:   { kind: "quark",  gen: 2, mass: 95,     charge: -1/3, spin: 0.5, color: 0xc9184a, symbol: "s",  group: "quark" },
+  top:       { kind: "quark",  gen: 3, mass: 173000, charge:  2/3, spin: 0.5, color: 0x800f2f, symbol: "t",  group: "quark", lifetime: 0.5 },
+  bottom:    { kind: "quark",  gen: 3, mass: 4180,   charge: -1/3, spin: 0.5, color: 0xa4133c, symbol: "b",  group: "quark" },
+  electron:  { kind: "lepton", gen: 1, mass: 0.511,  charge: -1,   spin: 0.5, color: 0x4cc9f0, symbol: "e",  group: "lepton" },
+  enu:       { kind: "lepton", gen: 1, mass: 0.0001, charge:  0,   spin: 0.5, color: 0x90e0ef, symbol: "νₑ", group: "lepton" },
+  muon:      { kind: "lepton", gen: 2, mass: 105.7,  charge: -1,   spin: 0.5, color: 0x4895ef, symbol: "μ",  group: "lepton", lifetime: 3.0 },
+  mnu:       { kind: "lepton", gen: 2, mass: 0.0001, charge:  0,   spin: 0.5, color: 0x4361ee, symbol: "νμ", group: "lepton" },
+  tau:       { kind: "lepton", gen: 3, mass: 1777,   charge: -1,   spin: 0.5, color: 0x3a0ca3, symbol: "τ",  group: "lepton", lifetime: 1.5 },
+  tnu:       { kind: "lepton", gen: 3, mass: 0.0001, charge:  0,   spin: 0.5, color: 0x480ca8, symbol: "ντ", group: "lepton" },
+  photon:    { kind: "boson",  mass: 0,      charge: 0,  spin: 1, color: 0xfff3b0, symbol: "γ", group: "gauge", selfAnti: true },
+  gluon:     { kind: "boson",  mass: 0,      charge: 0,  spin: 1, color: 0xffb703, symbol: "g", group: "gauge", selfAnti: true },
+  Wp:        { kind: "boson",  mass: 80377,  charge: 1,  spin: 1, color: 0x06ffa5, symbol: "W⁺", group: "gauge", lifetime: 2.0 },
+  Wm:        { kind: "boson",  mass: 80377,  charge: -1, spin: 1, color: 0x00b894, symbol: "W⁻", group: "gauge", lifetime: 2.0 },
+  Z:         { kind: "boson",  mass: 91188,  charge: 0,  spin: 1, color: 0x55efc4, symbol: "Z", group: "gauge", selfAnti: true, lifetime: 2.0 },
+  higgs:     { kind: "boson",  mass: 125100, charge: 0,  spin: 0, color: 0xf72585, symbol: "H", group: "scalar", lifetime: 1.5 },
+  graviton:  { kind: "boson",  mass: 0, charge: 0, spin: 2, color: 0xb5179e, symbol: "G", group: "gravity", selfAnti: true },
+};
+const PARTICLE_LIST = Object.keys(SM);
+const CONST = {
+  k_em: 4.0, G: 0.8, k_strong: 14.0, strongRange: 3.5,
+  softening: 0.5, c: 30.0, annihilateR: 0.6, worldSize: 40,
+  bindRange: 4.0,        // electron–nucleus binding distance
+  bindKEThreshold: 8.0,  // below this KE, electron can bind
+};
+const visualRadius = m => m <= 0 ? 0.18 : 0.18 + 0.12 * Math.log10(1 + m);
+const hex = c => '#' + c.toString(16).padStart(6, '0');
+
+// ============================================================
+// STATE
+// ============================================================
+const S = {
+  particles: [], nextId: 0, frame: 0,
+  scene: null, camera: null, renderer: null,
+  grid3d: null,
+  instanced: {}, trailLines: null, trailGeo: null, trailPositions: null, trailColors: null, trailIdx: 0,
+  raycaster: null,
+  cam: { theta: -0.7, phi: 1.0, radius: 70, target: null },
+  ui: {
+    running: true, timeScale: 1, gravityScale: 1, emScale: 1, strongScale: 1,
+    showGrid: true, showTrails: false, annihilation: true, decay: true, binding: true,
+    spawnType: 'electron', spawnAnti: false, spawnSpeed: 2,
+    drawer: null,
+  },
+  fps: { last: performance.now(), frames: 0, value: 60 },
+  events: [],
+};
+
+const TRAIL_LEN = 60; // segments per particle in trail buffer
+const MAX_TRAIL_PARTICLES = 50;
+
+// ============================================================
+// PARTICLE OPS
+// ============================================================
+function createParticle(type, isAnti, pos, vel) {
+  const def = SM[type];
+  S.particles.push({
+    id: S.nextId++, type,
+    isAnti: def.selfAnti ? false : !!isAnti,
+    def, pos: pos.clone(),
+    vel: vel ? vel.clone() : new THREE.Vector3(),
+    age: 0, alive: true,
+    radius: visualRadius(def.mass),
+    bondedTo: null, // index/id of particle electron is bound to
+    trail: [],
+  });
+}
+
+function spawnAt(worldPos) {
+  const dir = new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5)
+    .normalize().multiplyScalar(S.ui.spawnSpeed);
+  createParticle(S.ui.spawnType, S.ui.spawnAnti, worldPos, dir);
+  rebuildInstances();
+  logEvent('spawn ' + (S.ui.spawnAnti && !SM[S.ui.spawnType].selfAnti ? 'anti-' : '') + S.ui.spawnType);
+}
+
+function logEvent(msg) {
+  const log = document.getElementById('event-log');
+  const el = document.createElement('div');
+  el.className = 'event';
+  el.textContent = msg;
+  log.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+  // cap at 6 visible
+  while (log.children.length > 6) log.removeChild(log.firstChild);
+}
+
+// ============================================================
+// PRESETS
+// ============================================================
+function preset(name) {
+  S.particles = [];
+  const W = CONST.worldSize * 0.4;
+  const rnd = (s = W) => (Math.random() - 0.5) * 2 * s;
+
+  if (name === 'atoms') {
+    // hydrogen-like: spawn proton-equivalents (3 quark clusters: uud) + electrons nearby
+    for (let i = 0; i < 6; i++) {
+      const center = new THREE.Vector3(rnd(W*0.7), rnd(W*0.5), rnd(W*0.7));
+      // proton = uud, tightly clustered
+      ['up','up','down'].forEach(q => {
+        const off = new THREE.Vector3(rnd(0.5), rnd(0.5), rnd(0.5));
+        createParticle(q, false, center.clone().add(off), new THREE.Vector3(rnd(0.3), rnd(0.3), rnd(0.3)));
+      });
+      // electron at orbital distance, moving tangentially for orbit
+      const r = 4 + Math.random()*2;
+      const ang = Math.random()*Math.PI*2;
+      const epos = center.clone().add(new THREE.Vector3(Math.cos(ang)*r, rnd(1), Math.sin(ang)*r));
+      const evel = new THREE.Vector3(-Math.sin(ang)*1.5, 0, Math.cos(ang)*1.5);
+      createParticle('electron', false, epos, evel);
+    }
+    logEvent('hydrogen-like atoms seeded');
+  } else if (name === 'big-bang') {
+    // dense hot center exploding outward
+    const types = ['up','down','electron','photon','gluon','enu','up','down'];
+    for (let i = 0; i < 50; i++) {
+      const t = types[i % types.length];
+      const dir = new THREE.Vector3(rnd(1), rnd(1), rnd(1)).normalize();
+      const r = Math.random() * 3;
+      const pos = dir.clone().multiplyScalar(r);
+      const vel = dir.clone().multiplyScalar(4 + Math.random()*4);
+      createParticle(t, Math.random() < 0.45, pos, vel);
+    }
+    logEvent('big bang initiated');
+  } else if (name === 'collide') {
+    // two beams of e- and e+ heading at each other
+    for (let i = 0; i < 12; i++) {
+      const y = rnd(2), z = rnd(2);
+      createParticle('electron', false, new THREE.Vector3(-W*0.7, y, z), new THREE.Vector3(8, 0, 0));
+      createParticle('electron', true,  new THREE.Vector3( W*0.7, y, z), new THREE.Vector3(-8, 0, 0));
+    }
+    logEvent('matter / antimatter beams');
+  } else if (name === 'quarks') {
+    // many quarks → strong force will cluster them
+    ['up','down','up','down','up','down','strange','charm'].forEach(t => {
+      for (let i = 0; i < 6; i++) {
+        createParticle(t, Math.random() < 0.5,
+          new THREE.Vector3(rnd(), rnd(), rnd()),
+          new THREE.Vector3(rnd(2), rnd(2), rnd(2)));
+      }
+    });
+    logEvent('quark soup → confinement');
+  } else if (name === 'photons') {
+    for (let i = 0; i < 60; i++) {
+      const dir = new THREE.Vector3(rnd(1), rnd(1), rnd(1)).normalize().multiplyScalar(CONST.c * 0.3);
+      createParticle('photon', false, new THREE.Vector3(rnd(W), rnd(W), rnd(W)), dir);
+    }
+    logEvent('photon storm');
+  } else if (name === 'default') {
+    [['electron',6,false],['electron',4,true],['up',4,false],['up',3,true],
+     ['down',4,false],['down',3,true],['photon',8,false],['gluon',4,false],
+     ['muon',2,false],['muon',2,true]].forEach(([t,n,a]) => {
+      for (let i = 0; i < n; i++)
+        createParticle(t, a, new THREE.Vector3(rnd(), rnd(W*0.5), rnd()), new THREE.Vector3(rnd(2), rnd(2), rnd(2)));
+    });
+  }
+  // empty preset just leaves particles[] empty
+  rebuildInstances();
+}
+
+function clearAll() { S.particles = []; rebuildInstances(); logEvent('universe cleared'); }
+
+// ============================================================
+// RENDERING — INSTANCED MESHES + TRAILS
+// ============================================================
+function rebuildInstances() {
+  if (!S.scene) return;
+  Object.values(S.instanced).forEach(m => {
+    S.scene.remove(m); m.geometry.dispose(); m.material.dispose();
+  });
+  S.instanced = {};
+  const groups = {};
+  S.particles.forEach(p => { (groups[p.type] ||= []).push(p); });
+  Object.entries(groups).forEach(([type, list]) => {
+    const def = SM[type];
+    const geo = new THREE.SphereGeometry(1, 10, 8);
+    const mat = new THREE.MeshStandardMaterial({
+      color: def.color, emissive: def.color,
+      emissiveIntensity: def.kind === 'boson' ? 1.6 : 0.6,
+      metalness: 0.2, roughness: 0.4,
+    });
+    const mesh = new THREE.InstancedMesh(geo, mat, Math.max(list.length + 5, 5));
+    mesh.userData.type = type; mesh.count = list.length;
+    S.scene.add(mesh); S.instanced[type] = mesh;
+  });
+}
+
+function setupTrails() {
+  // line segments buffer: MAX_TRAIL_PARTICLES * TRAIL_LEN segments
+  const cap = MAX_TRAIL_PARTICLES * TRAIL_LEN * 2;
+  S.trailPositions = new Float32Array(cap * 3);
+  S.trailColors = new Float32Array(cap * 3);
+  S.trailGeo = new THREE.BufferGeometry();
+  S.trailGeo.setAttribute('position', new THREE.BufferAttribute(S.trailPositions, 3));
+  S.trailGeo.setAttribute('color', new THREE.BufferAttribute(S.trailColors, 3));
+  const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.6 });
+  S.trailLines = new THREE.LineSegments(S.trailGeo, mat);
+  S.trailLines.visible = false;
+  S.scene.add(S.trailLines);
+}
+
+function updateTrails() {
+  if (!S.ui.showTrails) { S.trailLines.visible = false; return; }
+  S.trailLines.visible = true;
+  // keep trail history per-particle (capped)
+  const tracked = S.particles.slice(0, MAX_TRAIL_PARTICLES);
+  let idx = 0;
+  tracked.forEach(p => {
+    p.trail.push(p.pos.clone());
+    if (p.trail.length > TRAIL_LEN) p.trail.shift();
+    const col = new THREE.Color(p.def.color);
+    for (let i = 1; i < p.trail.length; i++) {
+      const a = p.trail[i-1], b = p.trail[i];
+      const fade = i / p.trail.length;
+      S.trailPositions[idx*3]=a.x; S.trailPositions[idx*3+1]=a.y; S.trailPositions[idx*3+2]=a.z;
+      S.trailColors[idx*3]=col.r*fade; S.trailColors[idx*3+1]=col.g*fade; S.trailColors[idx*3+2]=col.b*fade;
+      idx++;
+      S.trailPositions[idx*3]=b.x; S.trailPositions[idx*3+1]=b.y; S.trailPositions[idx*3+2]=b.z;
+      S.trailColors[idx*3]=col.r*fade; S.trailColors[idx*3+1]=col.g*fade; S.trailColors[idx*3+2]=col.b*fade;
+      idx++;
+    }
+  });
+  // zero out the rest
+  for (let i = idx; i < S.trailPositions.length / 3; i++) {
+    S.trailPositions[i*3]=0; S.trailPositions[i*3+1]=0; S.trailPositions[i*3+2]=0;
+  }
+  S.trailGeo.setDrawRange(0, idx);
+  S.trailGeo.attributes.position.needsUpdate = true;
+  S.trailGeo.attributes.color.needsUpdate = true;
+}
+
+function decayProducts(p) {
+  switch (p.type) {
+    case 'muon': return [{type:'electron',anti:p.isAnti},{type:'enu',anti:!p.isAnti},{type:'mnu',anti:p.isAnti}];
+    case 'tau':  return [{type:'muon',anti:p.isAnti},{type:'mnu',anti:!p.isAnti},{type:'tnu',anti:p.isAnti}];
+    case 'top':  return [{type:'bottom',anti:p.isAnti},{type:p.isAnti?'Wm':'Wp',anti:false}];
+    case 'Wp':   return [{type:'electron',anti:true},{type:'enu',anti:false}];
+    case 'Wm':   return [{type:'electron',anti:false},{type:'enu',anti:true}];
+    case 'Z':    return [{type:'electron',anti:false},{type:'electron',anti:true}];
+    case 'higgs':return [{type:'bottom',anti:false},{type:'bottom',anti:true}];
+    default:     return [{type:'photon',anti:false},{type:'photon',anti:false}];
+  }
+}
+
+// ============================================================
+// PHYSICS
+// ============================================================
+function step(dt) {
+  const u = S.ui;
+  const ps = S.particles;
+  // forces
+  for (let i = 0; i < ps.length; i++) {
+    const a = ps[i]; if (!a.alive) continue;
+    let fx = 0, fy = 0, fz = 0;
+    for (let j = 0; j < ps.length; j++) {
+      if (i === j) continue;
+      const b = ps[j]; if (!b.alive) continue;
+      const dx = b.pos.x-a.pos.x, dy = b.pos.y-a.pos.y, dz = b.pos.z-a.pos.z;
+      const r2 = dx*dx + dy*dy + dz*dz + CONST.softening;
+      const r = Math.sqrt(r2);
+      // gravity
+      if (a.def.mass > 0 && b.def.mass > 0) {
+        const fg = Math.min((CONST.G * u.gravityScale * a.def.mass * b.def.mass) / r2, 200);
+        const k = fg / r;
+        fx += k*dx; fy += k*dy; fz += k*dz;
+      }
+      // EM
+      const qa = a.isAnti ? -a.def.charge : a.def.charge;
+      const qb = b.isAnti ? -b.def.charge : b.def.charge;
+      if (qa !== 0 && qb !== 0) {
+        const fe = -(CONST.k_em * u.emScale * qa * qb) / r2;
+        const k = fe / r;
+        fx += k*dx; fy += k*dy; fz += k*dz;
+      }
+      // strong
+      if (a.def.kind === 'quark' && b.def.kind === 'quark' && r < CONST.strongRange) {
+        const fs = CONST.k_strong * u.strongScale * Math.exp(-r / CONST.strongRange);
+        const k = fs / r;
+        fx += k*dx; fy += k*dy; fz += k*dz;
+      }
+    }
+    if (a.def.mass === 0) {
+      if (a.vel.lengthSq() < 0.01)
+        a.vel.set(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5);
+      a.vel.normalize().multiplyScalar(CONST.c * 0.3);
+    } else {
+      const m = Math.max(a.def.mass, 0.01);
+      const mEff = 1 + Math.log10(1 + m) * 0.5;
+      a.vel.x += (fx/mEff)*dt; a.vel.y += (fy/mEff)*dt; a.vel.z += (fz/mEff)*dt;
+      const sp = a.vel.length();
+      if (sp > CONST.c) a.vel.multiplyScalar(CONST.c / sp);
+    }
+  }
+  // integrate + wrap
+  const W = CONST.worldSize;
+  for (const p of ps) {
+    if (!p.alive) continue;
+    p.pos.addScaledVector(p.vel, dt);
+    p.age += dt;
+    if (p.pos.x > W) p.pos.x = -W; if (p.pos.x < -W) p.pos.x = W;
+    if (p.pos.y > W) p.pos.y = -W; if (p.pos.y < -W) p.pos.y = W;
+    if (p.pos.z > W) p.pos.z = -W; if (p.pos.z < -W) p.pos.z = W;
+  }
+  // annihilation
+  if (u.annihilation) {
+    for (let i = 0; i < ps.length; i++) {
+      const a = ps[i]; if (!a.alive) continue;
+      for (let j = i+1; j < ps.length; j++) {
+        const b = ps[j]; if (!b.alive) continue;
+        if (a.type !== b.type || a.def.selfAnti || a.isAnti === b.isAnti) continue;
+        if (a.pos.distanceTo(b.pos) < CONST.annihilateR) {
+          a.alive = false; b.alive = false;
+          const mid = a.pos.clone().add(b.pos).multiplyScalar(0.5);
+          const dir = new THREE.Vector3(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).normalize();
+          createParticle('photon', false, mid, dir.clone().multiplyScalar(CONST.c*0.3));
+          createParticle('photon', false, mid, dir.clone().multiplyScalar(-CONST.c*0.3));
+          logEvent('💥 ' + a.type + ' annihilation');
+        }
+      }
+    }
+  }
+  // decay
+  if (u.decay) {
+    for (const p of ps) {
+      if (!p.alive || !p.def.lifetime) continue;
+      if (Math.random() < dt / p.def.lifetime) {
+        p.alive = false;
+        const products = decayProducts(p);
+        products.forEach(prod => {
+          const v = new THREE.Vector3(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5)
+            .normalize().multiplyScalar(3 + Math.random()*3);
+          createParticle(prod.type, prod.anti, p.pos, v);
+        });
+        if (p.def.lifetime < 5) logEvent('↯ ' + p.type + ' decay');
+      }
+    }
+  }
+  // atom binding: if electron + nearby net-positive cluster + low KE → emit photon, slow electron
+  // (toy version of bremsstrahlung / radiative capture)
+  if (u.binding) {
+    for (const e of ps) {
+      if (!e.alive || e.type !== 'electron' || e.isAnti) continue;
+      // find net positive charge density near it (sum of charges of quarks within range)
+      let qSum = 0, cx = 0, cy = 0, cz = 0, count = 0;
+      for (const q of ps) {
+        if (!q.alive || q.def.kind !== 'quark') continue;
+        const d = e.pos.distanceTo(q.pos);
+        if (d < CONST.bindRange) {
+          const c = q.isAnti ? -q.def.charge : q.def.charge;
+          qSum += c;
+          cx += q.pos.x; cy += q.pos.y; cz += q.pos.z;
+          count++;
+        }
+      }
+      if (count >= 2 && qSum > 0.5) {
+        // KE relative to local nucleus
+        const ke = 0.5 * e.def.mass * e.vel.lengthSq();
+        if (ke > CONST.bindKEThreshold && Math.random() < dt * 0.3) {
+          // emit a photon, lose energy → bound state
+          e.vel.multiplyScalar(0.6);
+          const photonDir = e.vel.clone().normalize().multiplyScalar(-CONST.c * 0.3);
+          createParticle('photon', false, e.pos.clone(), photonDir);
+          logEvent('⚛ electron bound (γ emitted)');
+        }
+      }
+    }
+  }
+  S.particles = S.particles.filter(p => p.alive);
+}
+
+function updateInstances() {
+  const groups = {};
+  S.particles.forEach(p => { (groups[p.type] ||= []).push(p); });
+  const have = Object.keys(groups).sort().join(',');
+  const meshKeys = Object.keys(S.instanced).sort().join(',');
+  if (have !== meshKeys) rebuildInstances();
+  const dummy = new THREE.Object3D();
+  Object.entries(S.instanced).forEach(([type, mesh]) => {
+    const list = groups[type] || [];
+    if (list.length > mesh.instanceMatrix.count) { rebuildInstances(); return; }
+    mesh.count = list.length;
+    list.forEach((p, i) => {
+      dummy.position.copy(p.pos);
+      const r = p.radius;
+      dummy.scale.setScalar(p.isAnti ? r*0.85 : r);
+      // antiparticles spin slightly to differentiate
+      if (p.isAnti) dummy.rotation.y = p.age * 2;
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+  });
+}
+
+// ============================================================
+// 3D SPACE GRID (replaces old floor)
+// Three orthogonal wireframe planes intersecting at origin
+// ============================================================
+function build3DGrid() {
+  const grp = new THREE.Group();
+  const size = CONST.worldSize * 2;
+  const div = 16;
+  const mat = new THREE.LineBasicMaterial({ color: 0x1e3a5c, transparent: true, opacity: 0.35 });
+  // 3 axis-aligned grid planes
+  const xy = new THREE.GridHelper(size, div, 0x2a4d6e, 0x1e3a5c);
+  xy.rotation.x = Math.PI / 2;
+  xy.material.transparent = true; xy.material.opacity = 0.25;
+  const xz = new THREE.GridHelper(size, div, 0x2a4d6e, 0x1e3a5c);
+  xz.material.transparent = true; xz.material.opacity = 0.25;
+  const yz = new THREE.GridHelper(size, div, 0x2a4d6e, 0x1e3a5c);
+  yz.rotation.z = Math.PI / 2;
+  yz.material.transparent = true; yz.material.opacity = 0.25;
+  grp.add(xy); grp.add(xz); grp.add(yz);
+  // bounding wire box
+  const box = new THREE.BoxGeometry(size, size, size);
+  const edges = new THREE.EdgesGeometry(box);
+  const boxLines = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x2a4d6e, transparent: true, opacity: 0.4 }));
+  grp.add(boxLines);
+  return grp;
+}
+
+// ============================================================
+// THREE INIT
+// ============================================================
+function initThree() {
+  const W = window.innerWidth, H = window.innerHeight;
+  S.scene = new THREE.Scene();
+  S.scene.background = new THREE.Color(0x05060a);
+  S.scene.fog = new THREE.FogExp2(0x05060a, 0.010);
+  S.camera = new THREE.PerspectiveCamera(60, W/H, 0.1, 500);
+  S.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  S.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  S.renderer.setSize(W, H);
+  S.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  S.renderer.toneMappingExposure = 1.15;
+  document.getElementById('app').appendChild(S.renderer.domElement);
+  S.raycaster = new THREE.Raycaster();
+  S.cam.target = new THREE.Vector3();
+
+  // lights
+  S.scene.add(new THREE.AmbientLight(0x404060, 0.7));
+  const d = new THREE.DirectionalLight(0x88aaff, 0.7); d.position.set(20,40,20); S.scene.add(d);
+  const pt = new THREE.PointLight(0xff44aa, 0.5, 100); pt.position.set(0,10,0); S.scene.add(pt);
+  // starfield
+  const sg = new THREE.BufferGeometry();
+  const n = 400, sp = new Float32Array(n*3);
+  for (let i = 0; i < n; i++) {
+    const r = 150 + Math.random()*100;
+    const t = Math.random()*Math.PI*2;
+    const ph = Math.acos(2*Math.random()-1);
+    sp[i*3] = r*Math.sin(ph)*Math.cos(t);
+    sp[i*3+1] = r*Math.sin(ph)*Math.sin(t);
+    sp[i*3+2] = r*Math.cos(ph);
+  }
+  sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+  S.scene.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0x9bb1ff, size: 0.4, transparent: true, opacity: 0.7 })));
+  // 3D grid
+  S.grid3d = build3DGrid();
+  S.scene.add(S.grid3d);
+
+  setupTrails();
+  updateCam();
+}
+
+function updateCam() {
+  const c = S.cam;
+  S.camera.position.x = c.target.x + c.radius * Math.sin(c.phi) * Math.cos(c.theta);
+  S.camera.position.z = c.target.z + c.radius * Math.sin(c.phi) * Math.sin(c.theta);
+  S.camera.position.y = c.target.y + c.radius * Math.cos(c.phi);
+  S.camera.lookAt(c.target);
+}
+
+// ============================================================
+// INPUT — fixed: pointer events for unified mouse/touch
+// ============================================================
+function initInput() {
+  const dom = S.renderer.domElement;
+  let mode = null;       // 'drag' | 'pinch' | null
+  let downId = -1;
+  let sx = 0, sy = 0, lx = 0, ly = 0, st = 0, moved = 0;
+  const pointers = new Map();
+  let pinchD = 0, pinchR = 0;
+
+  const screenToWorld = (px, py) => {
+    const r = dom.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((px-r.left)/r.width)*2-1, -((py-r.top)/r.height)*2+1);
+    S.raycaster.setFromCamera(ndc, S.camera);
+    // intersect a plane through origin facing the camera
+    const camDir = new THREE.Vector3(); S.camera.getWorldDirection(camDir);
+    const plane = new THREE.Plane(camDir.negate(), 0);
+    const hit = new THREE.Vector3();
+    if (S.raycaster.ray.intersectPlane(plane, hit)) return hit;
+    return null;
+  };
+
+  const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
+  dom.addEventListener('pointerdown', e => {
+    pointers.set(e.pointerId, e);
+    if (pointers.size === 1) {
+      mode = 'drag';
+      downId = e.pointerId;
+      sx = lx = e.clientX; sy = ly = e.clientY;
+      st = performance.now(); moved = 0;
+      dom.setPointerCapture(e.pointerId);
+    } else if (pointers.size === 2) {
+      mode = 'pinch';
+      const [a, b] = [...pointers.values()];
+      pinchD = dist(a, b); pinchR = S.cam.radius;
+    }
+  });
+
+  dom.addEventListener('pointermove', e => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, e);
+    if (mode === 'drag' && e.pointerId === downId) {
+      const dx = e.clientX - lx, dy = e.clientY - ly;
+      moved += Math.abs(dx) + Math.abs(dy);
+      lx = e.clientX; ly = e.clientY;
+      S.cam.theta -= dx * 0.006;
+      S.cam.phi = Math.max(0.1, Math.min(Math.PI-0.1, S.cam.phi - dy*0.006));
+      updateCam();
+      // hover (desktop only — pointer with hover capability)
+      if (e.pointerType === 'mouse' && moved < 5) updateHover(e.clientX, e.clientY);
+    } else if (mode === 'pinch' && pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const d = dist(a, b);
+      S.cam.radius = Math.max(15, Math.min(180, pinchR * (pinchD / d)));
+      updateCam();
+    }
+  });
+
+  dom.addEventListener('pointermove', e => {
+    if (e.pointerType === 'mouse' && pointers.size === 0) {
+      updateHover(e.clientX, e.clientY);
+    }
+  });
+
+  dom.addEventListener('pointerup', e => {
+    if (pointers.has(e.pointerId)) pointers.delete(e.pointerId);
+    if (mode === 'drag' && e.pointerId === downId) {
+      // tap test
+      if (moved < 10 && performance.now() - st < 300) {
+        const w = screenToWorld(sx, sy);
+        if (w) spawnAt(w);
+      }
+    }
+    if (pointers.size < 2) mode = pointers.size === 1 ? 'drag' : null;
+    if (pointers.size === 1) {
+      const [only] = [...pointers.values()];
+      lx = only.clientX; ly = only.clientY;
+      downId = only.pointerId;
+      moved = 999; // prevent tap after pinch release
+    }
+  });
+
+  dom.addEventListener('pointercancel', e => {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) mode = pointers.size === 1 ? 'drag' : null;
+  });
+
+  // wheel zoom (desktop)
+  dom.addEventListener('wheel', e => {
+    e.preventDefault();
+    S.cam.radius = Math.max(15, Math.min(180, S.cam.radius + e.deltaY*0.05));
+    updateCam();
+  }, { passive: false });
+
+  // resize
+  window.addEventListener('resize', () => {
+    const W = window.innerWidth, H = window.innerHeight;
+    S.camera.aspect = W/H;
+    S.camera.updateProjectionMatrix();
+    S.renderer.setSize(W, H);
+  });
+}
+
+// ============================================================
+// HOVER TOOLTIP (desktop)
+// ============================================================
+function updateHover(px, py) {
+  const tt = document.getElementById('tooltip');
+  if (!S.raycaster) return;
+  const r = S.renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((px-r.left)/r.width)*2-1, -((py-r.top)/r.height)*2+1);
+  S.raycaster.setFromCamera(ndc, S.camera);
+  let nearest = null, nd = 2;
+  // raycast against instanced meshes
+  for (const m of Object.values(S.instanced)) {
+    const hits = S.raycaster.intersectObject(m);
+    if (hits.length) {
+      const list = S.particles.filter(p => p.type === m.userData.type);
+      const p = list[hits[0].instanceId];
+      if (p && hits[0].distance < nd * 50) { nearest = p; break; }
+    }
+  }
+  if (nearest) {
+    tt.style.display = 'block';
+    tt.style.left = (px + 14) + 'px';
+    tt.style.top = (py + 14) + 'px';
+    tt.innerHTML = `
+      <div class="name">${nearest.isAnti && !nearest.def.selfAnti ? 'anti-' : ''}${nearest.type} (${nearest.def.symbol})</div>
+      <div class="row"><span class="k">kind </span>${nearest.def.kind}${nearest.def.gen ? ' · gen ' + nearest.def.gen : ''}</div>
+      <div class="row"><span class="k">m </span>${nearest.def.mass} MeV</div>
+      <div class="row"><span class="k">q </span>${(nearest.isAnti ? -nearest.def.charge : nearest.def.charge).toFixed(2)}e</div>
+      <div class="row"><span class="k">spin </span>${nearest.def.spin}</div>
+      <div class="row"><span class="k">|v| </span>${nearest.vel.length().toFixed(2)}</div>
+    `;
+  } else {
+    tt.style.display = 'none';
+  }
+}
+
+// ============================================================
+// UI
+// ============================================================
+function buildPalette() {
+  const groups = { quark: [], lepton: [], gauge: [], scalar: [], gravity: [] };
+  PARTICLE_LIST.forEach(k => groups[SM[k].group].push(k));
+  ['palette-mobile', 'palette-desktop'].forEach(rootId => {
+    const root = document.getElementById(rootId);
+    if (!root) return;
+    root.innerHTML = '';
+    Object.entries(groups).forEach(([grp, list]) => {
+      const lbl = document.createElement('div');
+      lbl.className = 'group-label'; lbl.textContent = grp;
+      root.appendChild(lbl);
+      const grid = document.createElement('div');
+      grid.className = 'group-grid';
+      list.forEach(k => {
+        const def = SM[k];
+        const card = document.createElement('button');
+        card.className = 'pcard' + (S.ui.spawnType === k ? ' sel' : '');
+        card.dataset.type = k;
+        card.innerHTML = `<div class="pcard-dot" style="background:${hex(def.color)};box-shadow:0 0 6px ${hex(def.color)}"></div><div class="pcard-sym">${def.symbol}</div><div class="pcard-name">${k}</div>`;
+        card.addEventListener('click', () => {
+          S.ui.spawnType = k;
+          document.querySelectorAll('.pcard').forEach(c => {
+            c.classList.toggle('sel', c.dataset.type === k);
+          });
+          updatePill();
+        });
+        grid.appendChild(card);
+      });
+      root.appendChild(grid);
+    });
+  });
+}
+
+function updatePill() {
+  const def = SM[S.ui.spawnType];
+  document.getElementById('pill-dot').style.background = hex(def.color);
+  document.getElementById('pill-dot').style.boxShadow = `0 0 8px ${hex(def.color)}`;
+  document.getElementById('pill-name').textContent = (S.ui.spawnAnti && !def.selfAnti ? 'anti-' : '') + S.ui.spawnType;
+}
+
+function bindUI() {
+  document.getElementById('btn-play').addEventListener('click', () => {
+    S.ui.running = !S.ui.running;
+    const ic = document.getElementById('icon-play');
+    ic.innerHTML = S.ui.running
+      ? '<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>'
+      : '<polygon points="5 3 19 12 5 21 5 3"></polygon>';
+  });
+  document.getElementById('btn-seed').addEventListener('click', () => preset('default'));
+  document.getElementById('btn-clear').addEventListener('click', clearAll);
+
+  // tabs (mobile)
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const name = tab.dataset.tab;
+      S.ui.drawer = S.ui.drawer === name ? null : name;
+      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === S.ui.drawer));
+      document.querySelectorAll('.drawer').forEach(d => d.classList.remove('open'));
+      if (S.ui.drawer) document.getElementById('drawer-' + S.ui.drawer).classList.add('open');
+    });
+  });
+  document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => {
+    S.ui.drawer = null;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.drawer').forEach(d => d.classList.remove('open'));
+  }));
+
+  // sync mobile + desktop sliders
+  const linkSlider = (idM, idD, valM, valD, prop, decimals = 2) => {
+    const apply = v => {
+      S.ui[prop] = +v;
+      const fixed = (+v).toFixed(decimals);
+      [valM, valD].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = fixed; });
+      [idM, idD].forEach(id => { const el = document.getElementById(id); if (el && el.value !== v) el.value = v; });
+    };
+    [idM, idD].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', e => apply(e.target.value));
+    });
+  };
+  linkSlider('slider-speed-m', 'slider-speed-d', 'speed-val-m', 'speed-val-d', 'spawnSpeed', 1);
+  linkSlider('slider-time-m', 'slider-time-d', 't-val-m', 't-val-d', 'timeScale');
+  linkSlider('slider-grav-m', 'slider-grav-d', 'g-val-m', 'g-val-d', 'gravityScale');
+  linkSlider('slider-em-m', 'slider-em-d', 'em-val-m', 'em-val-d', 'emScale');
+  linkSlider('slider-strong-m', 'slider-strong-d', 's-val-m', 's-val-d', 'strongScale');
+
+  // anti toggle
+  ['anti-toggle-m', 'anti-toggle-d'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', e => {
+      S.ui.spawnAnti = e.target.checked;
+      ['anti-toggle-m', 'anti-toggle-d'].forEach(other => {
+        const el2 = document.getElementById(other);
+        if (el2 && el2 !== e.target) el2.checked = e.target.checked;
+      });
+      updatePill();
+    });
+  });
+
+  // toggles
+  const linkToggle = (idM, idD, prop) => {
+    const click = (btn, otherBtn) => () => {
+      S.ui[prop] = !S.ui[prop];
+      [btn, otherBtn].forEach(b => { if (b) b.querySelector('.toggle').classList.toggle('on', S.ui[prop]); });
+    };
+    const m = document.getElementById(idM), d = document.getElementById(idD);
+    if (m) m.addEventListener('click', click(m, d));
+    if (d) d.addEventListener('click', click(d, m));
+  };
+  linkToggle('toggle-anni-m', 'toggle-anni-d', 'annihilation');
+  linkToggle('toggle-decay-m', 'toggle-decay-d', 'decay');
+  linkToggle('toggle-binding-m', 'toggle-binding-d', 'binding');
+  linkToggle('toggle-grid-m', 'toggle-grid-d', 'showGrid');
+  linkToggle('toggle-trails-m', 'toggle-trails-d', 'showTrails');
+
+  // presets
+  ['atom', 'bb', 'anni', 'quark', 'photon', 'empty'].forEach(name => {
+    const map = { atom: 'atoms', bb: 'big-bang', anni: 'collide', quark: 'quarks', photon: 'photons', empty: 'empty' };
+    [`seed-${name}-m`, `seed-${name}-d`].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('click', () => {
+        preset(map[name]);
+        // close mobile drawer if open
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.drawer').forEach(d => d.classList.remove('open'));
+        S.ui.drawer = null;
+      });
+    });
+  });
+}
+
+function updateStats() {
+  if (S.frame % 20 !== 0) return;
+  const ps = S.particles;
+  const byType = {};
+  let KE = 0;
+  ps.forEach(p => {
+    const k = p.isAnti ? p.type + '̄' : p.type;
+    byType[k] = (byType[k] || 0) + 1;
+    KE += 0.5 * Math.max(p.def.mass, 0.001) * p.vel.lengthSq();
+  });
+  document.getElementById('stat-n').textContent = ps.length;
+  document.getElementById('stat-ke').textContent = KE > 9999 ? (KE/1000).toFixed(0) + 'k' : KE.toFixed(0);
+  document.getElementById('stat-fps').textContent = S.fps.value;
+  // pop bars
+  const items = Object.entries(byType).slice(0, 10);
+  const html = '<span class="lbl">POP</span>' + (items.length === 0
+    ? '<span style="color:rgba(8,145,178,0.7)">vacuum</span>'
+    : items.map(([k,v]) => `<span class="kv"><span class="k">${k} </span>${v}</span>`).join(''));
+  ['pop-mobile', 'pop-desktop'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  });
+}
+
+function updateFPS(now) {
+  S.fps.frames++;
+  if (now - S.fps.last >= 1000) {
+    S.fps.value = S.fps.frames;
+    S.fps.frames = 0;
+    S.fps.last = now;
+  }
+}
+
+// ============================================================
+// MAIN
+// ============================================================
+function start() {
+  initThree();
+  initInput();
+  buildPalette();
+  bindUI();
+  updatePill();
+  preset('default');
+  document.getElementById('loading').style.display = 'none';
+
+  const clock = new THREE.Clock();
+  function loop(now) {
+    requestAnimationFrame(loop);
+    updateFPS(now);
+    const dt = Math.min(clock.getDelta(), 0.05) * S.ui.timeScale;
+    if (S.ui.running && dt > 0) {
+      const sub = Math.max(1, Math.ceil(S.ui.timeScale));
+      for (let k = 0; k < sub; k++) step(dt/sub);
+    }
+    updateInstances();
+    if (S.grid3d) S.grid3d.visible = S.ui.showGrid;
+    if (S.frame % 2 === 0) updateTrails();
+    updateStats();
+    S.renderer.render(S.scene, S.camera);
+    S.frame++;
+  }
+  loop(performance.now());
+}
+
+if (typeof THREE !== 'undefined') start();
+else window.addEventListener('three-ready', () => { if (typeof THREE !== 'undefined') start(); });
+</script>
+</body>
+</html>
