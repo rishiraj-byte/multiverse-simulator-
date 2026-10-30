@@ -1,0 +1,8 @@
+{
+  "name": "cosmos",
+  "productName": "Cosmos",
+  "version": "1.0.0",
+  "description": "Cosmos — the observable universe simulator",
+  "author": "Rj",
+  "main": "main.cjs"
+}

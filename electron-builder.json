@@ -1,0 +1,25 @@
+{
+  "appId": "com.rj.cosmos",
+  "productName": "Cosmos",
+  "electronVersion": "33.2.1",
+  "directories": { "app": "desktop", "output": "release" },
+  "files": ["main.cjs", "package.json", "icon.png", "dist/**/*"],
+  "asar": true,
+  "afterPack": "desktop-tools/set-icon.cjs",
+  "win": {
+    "target": [{ "target": "nsis", "arch": ["x64"] }],
+    "icon": "desktop/icon.ico",
+    "signAndEditExecutable": false
+  },
+  "nsis": {
+    "oneClick": true,
+    "perMachine": false,
+    "createDesktopShortcut": "always",
+    "createStartMenuShortcut": true,
+    "shortcutName": "Cosmos",
+    "runAfterFinish": true,
+    "installerIcon": "desktop/icon.ico",
+    "uninstallerIcon": "desktop/icon.ico",
+    "artifactName": "Cosmos-Setup-${version}.exe"
+  }
+}

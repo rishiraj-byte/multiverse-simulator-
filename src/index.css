@@ -1,0 +1,186 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
+    --radius: 0.625rem;
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    background: #020409;
+    color: #e6e6e1;
+    overscroll-behavior: none;
+  }
+}
+
+/* ── COSMOS design system ──
+   Palette: deep space purple #050a21/#0a0521, warm cream #e6e6e1/#f1e9dd,
+   accent violet #8642ff / #9a92d9, depth purple #362669, glow #9262E8. */
+
+.font-display {
+  font-family: 'Space Grotesk', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.font-hud {
+  font-family: 'JetBrains Mono', ui-monospace, 'PingFang SC', 'Microsoft YaHei', monospace;
+}
+
+.cosmos-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+/* projected 3D labels */
+.cosmos-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: #f4efe6;
+  background: rgba(4, 6, 20, 0.78);
+  border: 1px solid rgba(154, 146, 217, 0.22);
+  border-radius: 6px;
+  padding: 2px 7px;
+  white-space: nowrap;
+  user-select: none;
+  will-change: transform;
+}
+
+.cosmos-label.major {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  border-color: rgba(169, 139, 255, 0.6);
+}
+
+.cosmos-label.minor {
+  color: #ddd8f7;
+  font-size: 11px;
+}
+
+.cosmos-label.clickable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.cosmos-label.clickable:hover {
+  color: #ffffff;
+  border-color: #a98bff;
+}
+
+/* shadcn slider/switch on the cosmic palette */
+[data-slot='slider-track'] {
+  background: rgba(54, 38, 105, 0.6) !important;
+}
+
+[data-slot='slider-range'] {
+  background: #8642ff !important;
+}
+
+[data-slot='slider-thumb'] {
+  border-color: #9a92d9 !important;
+  background: #f1e9dd !important;
+  width: 18px !important;
+  height: 18px !important;
+}
+
+[data-slot='switch'] {
+  background: rgba(54, 38, 105, 0.7) !important;
+}
+
+[data-slot='switch'][data-state='checked'] {
+  background: #8642ff !important;
+}
+
+/* subtle scrollbar for the physics panel */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(134, 66, 255, 0.35);
+  border-radius: 3px;
+}
+/* ── v2 additions ── */
+.cosmos-canvas.placing { cursor: copy; }
+.cosmos-label.tiny { font-size: 10px; color: #c9c3ee; }
+.cosmos-label.ring { background: transparent; border-color: transparent; color: #8f89c2; font-size: 10px; }
+.cosmos-label.selected { color: #ffffff; background: rgba(134, 66, 255, 0.55); border-color: #c9b8ff; }
+button:focus-visible, input:focus-visible, [role='tab']:focus-visible, [role='radio']:focus-visible {
+  outline: 2px solid #a98bff;
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
