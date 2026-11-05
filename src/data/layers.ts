@@ -12,13 +12,13 @@ import { vizier, simbad, gavoAsync, fetchText, parseCSV, num, type Progress } fr
 
 export type Category =
   | 'stars' | 'exoplanets' | 'blackholes' | 'pulsars' | 'whitedwarfs' | 'clusters' | 'nebulae' | 'gas'
-  | 'galaxies' | 'groups' | 'superclusters' | 'quasars' | 'darkmatter' | 'darkenergy';
+  | 'galaxies' | 'groups' | 'superclusters' | 'quasars' | 'darkmatter' | 'darkenergy' | 'youngstars';
 
 export const CATEGORY_LABEL: Record<Category, string> = {
   stars: 'Stars', exoplanets: 'Exoplanets', blackholes: 'Black holes & X-ray binaries', pulsars: 'Pulsars & neutron stars',
   whitedwarfs: 'White dwarfs', clusters: 'Star clusters', nebulae: 'Nebulae & clouds', gas: 'Gas',
   galaxies: 'Galaxies', groups: 'Galaxy groups & clusters', superclusters: 'Superclusters', quasars: 'Quasars',
-  darkmatter: 'Dark matter', darkenergy: 'Dark energy',
+  darkmatter: 'Dark matter', darkenergy: 'Dark energy', youngstars: 'Star & planet formation',
 };
 
 export interface RealLayer {
@@ -30,6 +30,9 @@ export interface RealLayer {
   pos: Float32Array;               // ly, galactic frame (x → GC, y → l=90°, z → NGP)
   z?: Float32Array;                // redshift per object when the distance came from z (re-scaled if the cosmology changes)
   cosmoKey?: string;               // cosmology the redshift distances were computed with
+  vel?: Float32Array;              // ly/yr, same frame — real space motion (proper motion + radial velocity)
+  epoch?: number;                  // decimal year the positions refer to
+  schema?: number;                 // loader version (cached copies from older loaders are re-downloaded)
   rgb: Float32Array;
   size: Float32Array;
   mag: Float32Array;               // apparent magnitude, NaN if unknown
@@ -51,6 +54,8 @@ export interface SourceDef {
   size: string;                    // human estimate of download
   simulated?: boolean;
   recommended?: boolean;
+  schema?: number;
+  desktopOnly?: boolean;           // archive blocks browsers; works in the desktop app
   load: (ctx: LoadCtx) => Promise<RealLayer>;
 }
 
@@ -62,10 +67,11 @@ const C_KMS = 299792.458;
 
 // ── helpers ──────────────────────────────────────────────────────────
 
-class Builder {
+export class Builder {
   pos: number[] = []; rgb: number[] = []; size: number[] = []; mag: number[] = [];
   names: string[] = []; types: string[] = []; details: Record<string, string[]> = {}; notable: number[] = [];
   zs: number[] = []; hasZ = false;
+  vel: number[] = []; hasVel = false;
   skipped = 0;
   private detailKeys: string[];
   constructor(detailKeys: string[] = []) { this.detailKeys = detailKeys; for (const k of detailKeys) this.details[k] = []; }
@@ -78,11 +84,24 @@ class Builder {
     this.names.push(name); this.types.push(type);
     for (const k of this.detailKeys) this.details[k].push(det[k] ?? '');
     this.zs.push(z); if (isFinite(z)) this.hasZ = true;
+    this.vel.push(0, 0, 0);
     return this.n - 1;
+  }
+  /** Space velocity of object i from proper motion (mas/yr, μα* = μα·cosδ) and radial velocity (km/s). */
+  setMotion(i: number, raDeg: number, decDeg: number, distLy: number, pmra: number, pmdec: number, rvKms: number) {
+    if (i < 0 || !isFinite(pmra) || !isFinite(pmdec)) return;
+    const a = raDeg * Math.PI / 180, d = decDeg * Math.PI / 180, dpc = distLy / PC_LY;
+    const ve = 4.740470446 * (pmra / 1000) * dpc, vn = 4.740470446 * (pmdec / 1000) * dpc, vr = isFinite(rvKms) ? rvKms : 0; // km/s
+    const sa = Math.sin(a), ca = Math.cos(a), sd = Math.sin(d), cd = Math.cos(d);
+    const v: [number, number, number] = [-sa * ve - sd * ca * vn + cd * ca * vr, ca * ve - sd * sa * vn + cd * sa * vr, cd * vn + sd * vr];
+    const g = eqToGalactic(v), k = 3.33564095e-6; // km/s → ly/yr
+    this.vel[i * 3] = g[0] * k; this.vel[i * 3 + 1] = g[1] * k; this.vel[i * 3 + 2] = g[2] * k;
+    this.hasVel = true;
   }
   build(meta: Omit<RealLayer, 'n' | 'pos' | 'rgb' | 'size' | 'mag' | 'names' | 'types' | 'details' | 'notable' | 'skipped' | 'loadedAt'>, cosmo?: CosmoParams): RealLayer {
     return {
       z: this.hasZ ? Float32Array.from(this.zs) : undefined, cosmoKey: this.hasZ && cosmo ? cosmoKey(cosmo) : undefined,
+      vel: this.hasVel ? Float32Array.from(this.vel) : undefined,
       ...meta, n: this.n, pos: Float32Array.from(this.pos), rgb: Float32Array.from(this.rgb), size: Float32Array.from(this.size),
       mag: Float32Array.from(this.mag), names: this.names, types: this.types, details: this.details, notable: this.notable,
       skipped: this.skipped, loadedAt: new Date().toISOString(),
@@ -159,7 +178,7 @@ async function loadHYG(ctx: LoadCtx): Promise<RealLayer> {
   ctx.progress('Parsing 119 000 stars…');
   const { header, rows } = parseCSV(text);
   const ix = (k: string) => header.indexOf(k);
-  const I = { id: ix('id'), hip: ix('hip'), hd: ix('hd'), gl: ix('gl'), bf: ix('bf'), proper: ix('proper'), ra: ix('ra'), dec: ix('dec'), dist: ix('dist'), mag: ix('mag'), absmag: ix('absmag'), spect: ix('spect'), ci: ix('ci'), con: ix('con'), lum: ix('lum') };
+  const I = { id: ix('id'), hip: ix('hip'), hd: ix('hd'), gl: ix('gl'), bf: ix('bf'), proper: ix('proper'), ra: ix('ra'), dec: ix('dec'), dist: ix('dist'), pmra: ix('pmra'), pmdec: ix('pmdec'), rv: ix('rv'), mag: ix('mag'), absmag: ix('absmag'), spect: ix('spect'), ci: ix('ci'), con: ix('con'), lum: ix('lum') };
   const b = new Builder(['Spectral type', 'Absolute magnitude', 'Constellation', 'Luminosity (L☉)', 'Catalogue IDs']);
   for (const r of rows) {
     if (r[I.id] === '0') continue; // the Sun is drawn by the Solar-System layer
@@ -172,15 +191,16 @@ async function loadHYG(ctx: LoadCtx): Promise<RealLayer> {
     const wd = spect.startsWith('D');
     const idx = b.add(num(r[I.ra]) * 15, num(r[I.dec]), dpc * PC_LY, starRGB(isFinite(ci) ? bvToTeff(ci) : 5800, m), starSize(m), name, wd ? 'White dwarf' : spect ? `Star (${spect.slice(0, 6)})` : 'Star', m,
       { 'Spectral type': spect, 'Absolute magnitude': r[I.absmag], Constellation: r[I.con], 'Luminosity (L☉)': r[I.lum] ? Number(r[I.lum]).toPrecision(3) : '', 'Catalogue IDs': ids });
+    b.setMotion(idx, num(r[I.ra]) * 15, num(r[I.dec]), dpc * PC_LY, num(r[I.pmra]), num(r[I.pmdec]), num(r[I.rv]));
     if (idx >= 0 && r[I.proper]) b.notable.push(idx);
   }
-  return b.build({ key: 'hyg', title: 'HYG stars', category: 'stars', simulated: false, distMethod: 'Trigonometric parallax (Hipparcos / Gaia), via HYG v4.1', source: 'HYG Database v4.1 (Nash, astronexus) — Hipparcos, Yale BSC, Gliese' });
+  return b.build({ key: 'hyg', title: 'HYG stars', category: 'stars', simulated: false, epoch: 2000.0, schema: 2, distMethod: 'Trigonometric parallax (Hipparcos / Gaia), via HYG v4.1; positions moved forward with each star’s measured motion', source: 'HYG Database v4.1 (Nash, astronexus) — Hipparcos, Yale BSC, Gliese' });
 }
 
 function gaiaLoader(gMax: number, key: string): (ctx: LoadCtx) => Promise<RealLayer> {
   return async (ctx) => {
     const rows = await gavoAsync(
-      `SELECT source_id, ra, dec, parallax, phot_g_mean_mag, phot_bp_mean_mag, phot_rp_mean_mag FROM gaia.dr3lite WHERE phot_g_mean_mag < ${gMax} AND parallax > 0 AND parallax > 5 * parallax_error`,
+      `SELECT source_id, ra, dec, parallax, pmra, pmdec, radial_velocity, phot_g_mean_mag, phot_bp_mean_mag, phot_rp_mean_mag FROM gaia.dr3lite WHERE phot_g_mean_mag < ${gMax} AND parallax > 0 AND parallax > 5 * parallax_error`,
       3_000_000, ctx.progress, ctx.signal);
     ctx.progress(`Placing ${rows.length.toLocaleString('en-US')} Gaia stars…`);
     // de-duplicate against HYG (bright stars) when loaded: same position within 0.02° and similar brightness
@@ -214,11 +234,12 @@ function gaiaLoader(gMax: number, key: string): (ctx: LoadCtx) => Promise<RealLa
         if (dup) { dupes++; continue; }
       }
       const c = bp - rp;
-      b.add(ra, dec, (1000 / plx) * PC_LY, starRGB(isFinite(c) ? bprpToTeff(c) : 5800, g), starSize(g) * 0.9, `Gaia DR3 ${r.source_id}`, 'Star (Gaia DR3)', g,
+      const gi = b.add(ra, dec, (1000 / plx) * PC_LY, starRGB(isFinite(c) ? bprpToTeff(c) : 5800, g), starSize(g) * 0.9, `Gaia DR3 ${r.source_id}`, 'Star (Gaia DR3)', g,
         { 'Gaia DR3 source_id': r.source_id, 'Parallax (mas)': plx.toFixed(3), 'G magnitude': g.toFixed(2), 'BP−RP colour': isFinite(c) ? c.toFixed(2) : '' });
+      b.setMotion(gi, ra, dec, (1000 / plx) * PC_LY, num(r.pmra), num(r.pmdec), num(r.radial_velocity));
     }
     return b.build({
-      key, title: `Gaia DR3 stars (G < ${gMax})`, category: 'stars', simulated: false,
+      key, title: `Gaia DR3 stars (G < ${gMax})`, category: 'stars', simulated: false, epoch: 2016.0, schema: 2,
       distMethod: 'Gaia trigonometric parallax (≥ 5σ), d = 1/ϖ', source: `Gaia DR3 (Gaia Collaboration 2023) via GAVO Heidelberg${dupes ? ` · ${dupes.toLocaleString('en-US')} duplicates of HYG stars removed` : ''}`,
     });
   };
@@ -563,14 +584,58 @@ async function simGas(ctx: LoadCtx): Promise<RealLayer> {
   };
 }
 
+// ── star & planet formation ──────────────────────────────────────────
+
+const FAMOUS_YSO = new Set(['HL Tau', 'TW Hya', 'PDS 70', 'AB Aur', 'DG Tau', 'GG Tau', 'HD 163296', 'HD 169142', 'AS 209', 'Elias 2-27', 'IM Lup', 'V883 Ori', 'FU Ori', 'T Tau', 'R Mon', 'MWC 480', 'LkCa 15', 'GM Aur', 'DM Tau', 'AA Tau']);
+
+async function loadYoungStars(ctx: LoadCtx): Promise<RealLayer> {
+  const rows = await simbad(`SELECT b.main_id, b.ra, b.dec, b.otype, b.plx_value, b.plx_err, b.sp_type FROM basic b WHERE b.otype IN ('Y*O','TT*','Ae*','pr*','Or*') AND b.plx_value > 0.3 AND b.plx_err > 0 AND b.plx_value > 5 * b.plx_err`, ctx.progress);
+  const L: Record<string, [string, number]> = {
+    'Y*O': ['Young stellar object (still forming, often with a planet-forming disk)', 0xff9a6a], 'TT*': ['T Tauri star (young Sun-like star with a disk)', 0xffb27a],
+    'Ae*': ['Herbig Ae/Be star (young massive star with a disk)', 0xfff0a0], 'pr*': ['Pre-main-sequence star', 0xffc89a], 'Or*': ['Orion variable (young star)', 0xffd0a0],
+  };
+  const b = new Builder(['SIMBAD type', 'Spectral type', 'Parallax (mas)']);
+  for (const r of rows) {
+    const [label, col] = L[r.otype] ?? ['Young star', 0xffb27a];
+    const name = cleanName(r.main_id);
+    const idx = b.add(num(r.ra), num(r.dec), (1000 / num(r.plx_value)) * PC_LY, hex(col), 2.6, name, label, NaN, { 'SIMBAD type': r.otype, 'Spectral type': r.sp_type, 'Parallax (mas)': Number(r.plx_value).toFixed(3) });
+    if (idx >= 0 && (r.main_id.startsWith('NAME ') || FAMOUS_YSO.has(name))) b.notable.push(idx);
+  }
+  return b.build({ key: 'yso', title: 'Young stars & planet-forming disks', category: 'youngstars', simulated: false, distMethod: 'Gaia trigonometric parallax (≥ 5σ)', source: 'SIMBAD young stellar objects, T Tauri, Herbig Ae/Be and pre-main-sequence stars. Planets form in disks around such stars over millions of years — a process that cannot be watched live.' });
+}
+
+/** NASA Exoplanet Archive: every confirmed planet with its measured orbit (desktop app; the archive blocks browsers). */
+async function loadNasaExoplanets(ctx: LoadCtx): Promise<RealLayer> {
+  const q = 'select pl_name,hostname,pl_orbsmax,pl_orbper,pl_bmasse,pl_rade,pl_orbeccen,st_mass,st_teff,st_rad,st_lum,sy_dist,ra,dec,disc_year,discoverymethod from pscomppars';
+  const text = await fetchText(`https://exoplanetarchive.ipac.caltech.edu/TAP/sync?format=csv&query=${encodeURIComponent(q)}`, ctx.progress, 'NASA Exoplanet Archive');
+  const { header, rows } = parseCSV(text);
+  const ix = (k: string) => header.indexOf(k);
+  const keys = ['Host', 'Orbit (AU)', 'Period (days)', 'Eccentricity', 'Mass (Earths)', 'Radius (Earths)', 'Host mass (Suns)', 'Host temperature (K)', 'Host radius (Suns)', 'Host luminosity (log L☉)', 'Discovered', 'Method'];
+  const b = new Builder(keys);
+  const fmt = (v: string, d = 3) => { const n = num(v); return isFinite(n) ? String(Number(n.toPrecision(d))) : ''; };
+  for (const r of rows) {
+    const g = (k: string) => r[ix(k)] ?? '';
+    const dpc = num(g('sy_dist')), m = num(g('pl_bmasse'));
+    const col: [number, number, number] = m > 50 ? [0.95, 0.75, 0.45] : m > 8 ? [0.55, 0.8, 1] : [0.45, 1, 0.55];
+    b.add(num(g('ra')), num(g('dec')), dpc * PC_LY, col, 3.2, g('pl_name'), 'Exoplanet', NaN, {
+      Host: g('hostname'), 'Orbit (AU)': fmt(g('pl_orbsmax'), 4), 'Period (days)': fmt(g('pl_orbper'), 6), Eccentricity: fmt(g('pl_orbeccen')),
+      'Mass (Earths)': fmt(g('pl_bmasse')), 'Radius (Earths)': fmt(g('pl_rade')), 'Host mass (Suns)': fmt(g('st_mass')), 'Host temperature (K)': fmt(g('st_teff'), 4),
+      'Host radius (Suns)': fmt(g('st_rad')), 'Host luminosity (log L☉)': fmt(g('st_lum')), Discovered: g('disc_year'), Method: g('discoverymethod'),
+    });
+  }
+  return b.build({ key: 'nasaexo', title: 'Exoplanets (NASA, with orbits)', category: 'exoplanets', simulated: false, distMethod: 'Host-star distance (mostly Gaia parallax), NASA Exoplanet Archive', source: 'NASA Exoplanet Archive, Planetary Systems Composite Parameters (all confirmed planets)' });
+}
+
 // ── registry ─────────────────────────────────────────────────────────
 
 export const SOURCES: SourceDef[] = [
-  { key: 'hyg', title: 'Named & nearby stars (HYG)', category: 'stars', what: '119 600 stars with names, spectral types and parallax distances — every star visible to the eye and far beyond.', size: '34 MB', recommended: true, load: loadHYG },
-  { key: 'gaia9', title: 'Gaia DR3 stars, G < 9', category: 'stars', what: '~170 000 stars with precise Gaia parallaxes; ~94 000 added after removing HYG duplicates (≈ 1–2 min).', size: '13 MB', recommended: true, load: gaiaLoader(9, 'gaia9') },
-  { key: 'gaia10', title: 'Gaia DR3 stars, G < 10', category: 'stars', what: '~450 000 stars (≈ 2–4 min). Replaces nothing — load instead of G < 9 for more.', size: '≈ 35 MB', load: gaiaLoader(10, 'gaia10') },
-  { key: 'gaia11', title: 'Gaia DR3 stars, G < 11', category: 'stars', what: '~1.2 million stars (several minutes; heavy on memory).', size: '≈ 95 MB', load: gaiaLoader(11, 'gaia11') },
-  { key: 'exo', title: 'Exoplanets', category: 'exoplanets', what: 'Every planet in SIMBAD whose host star has a parallax.', size: '1 MB', recommended: true, load: loadExoplanets },
+  { key: 'hyg', title: 'Named & nearby stars (HYG)', category: 'stars', what: '119 600 stars with names, spectral types and parallax distances — every star visible to the eye and far beyond.', size: '34 MB', recommended: true, schema: 2, load: loadHYG },
+  { key: 'gaia9', title: 'Gaia DR3 stars, G < 9', category: 'stars', what: '~170 000 stars with precise Gaia parallaxes; ~94 000 added after removing HYG duplicates (≈ 1–2 min).', size: '13 MB', recommended: true, schema: 2, load: gaiaLoader(9, 'gaia9') },
+  { key: 'gaia10', title: 'Gaia DR3 stars, G < 10', category: 'stars', what: '~450 000 stars (≈ 2–4 min). Replaces nothing — load instead of G < 9 for more.', size: '≈ 35 MB', schema: 2, load: gaiaLoader(10, 'gaia10') },
+  { key: 'gaia11', title: 'Gaia DR3 stars, G < 11', category: 'stars', what: '~1.2 million stars (several minutes; heavy on memory).', size: '≈ 95 MB', schema: 2, load: gaiaLoader(11, 'gaia11') },
+  { key: 'nasaexo', title: 'Exoplanets with real orbits (NASA)', category: 'exoplanets', what: 'All ~6 400 confirmed exoplanets with measured orbits, masses and sizes — open any of them as a real system. Desktop app only.', size: '1 MB', recommended: true, desktopOnly: true, load: loadNasaExoplanets },
+  { key: 'exo', title: 'Exoplanets (SIMBAD positions)', category: 'exoplanets', what: 'Planets in SIMBAD whose host star has a parallax — positions only. Works in the browser too.', size: '1 MB', load: loadExoplanets },
+  { key: 'yso', title: 'Star & planet formation', category: 'youngstars', what: 'Young stars still forming and stars with planet-forming disks (T Tauri, Herbig Ae/Be), with Gaia distances.', size: '≈ 2 MB', recommended: true, load: loadYoungStars },
   { key: 'bh', title: 'Black holes & X-ray binaries', category: 'blackholes', what: 'Confirmed and candidate stellar black holes, X-ray binaries, ULXs.', size: '< 1 MB', recommended: true, load: loadBH },
   { key: 'psr', title: 'Pulsars (ATNF)', category: 'pulsars', what: '~2 500 radio pulsars (neutron stars) from the VizieR copy of the ATNF catalogue.', size: '1 MB', recommended: true, load: loadPulsars },
   { key: 'wd', title: 'White dwarfs (Gaia)', category: 'whitedwarfs', what: '~134 000 high-confidence Gaia white dwarfs with > 10σ parallax.', size: '≈ 4 MB', load: loadWD },

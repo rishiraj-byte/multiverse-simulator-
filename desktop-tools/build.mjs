@@ -12,8 +12,8 @@ const postcss = req('postcss');
 const tailwind = req('tailwindcss');
 const autoprefixer = req('autoprefixer');
 
-const out = path.join(root, 'desktop', 'dist');
-fs.rmSync(out, { recursive: true, force: true });
+const out = process.argv[3] ? path.resolve(process.argv[3]) : path.join(root, 'desktop', 'dist');
+try { fs.rmSync(out, { recursive: true, force: true }); } catch { /* files are overwritten below */ }
 fs.mkdirSync(path.join(out, 'assets'), { recursive: true });
 
 const cssPlugin = {

@@ -5,8 +5,9 @@ import type { PhysicsParams } from '../../sim/physics';
 import { Rng, hashSeed } from '../../sim/rng';
 import {
   julianDate, dateFromJD, heliocentric, moonGeocentric, eclToEq, eqToGalactic, fromRaDec, toRaDec, fmtRA, fmtDec,
-  keplerHelio, PLANET_IDS, AU_LY, type Vec3,
+  keplerHelio, PLANET_IDS, AU_LY, gmstDeg, type Vec3,
 } from '../../sim/ephemeris';
+import { liveStore, ago, comovingFromLuminosity, type LiveEvent } from '../../data/live';
 import { CATALOG, KIND_LABEL, CMB_DIPOLE, CMB_COLD_SPOT, type CatObj } from '../../sim/skycatalog';
 import { comovingDistanceLy, particleHorizonLy, lookbackGyr, zAtComovingLy, LY_PER_MPC, MPC_PER_UNIT, type CosmoParams } from '../../sim/cosmology';
 import { generateGalaxy, placeNamedStars, updateGalaxy, starClass, MILKY_WAY, MW_NAMED, type GalaxyParams } from '../../sim/galaxy';
@@ -45,6 +46,7 @@ export type MapAction =
   | { kind: 'preset'; id: string }
   | { kind: 'solar'; bodyId?: string }
   | { kind: 'nucleus' }
+  | { kind: 'host'; name: string; layerKey: string }
   | { kind: 'none' };
 
 interface Layer {
@@ -57,7 +59,7 @@ interface Layer {
   points: THREE.Points;
 }
 
-interface Marker { id: string; name: string; kind: string; real: Vec3; disp: THREE.Vector3; layer: 'cat' | 'sol' | 'real'; obj?: CatObj; distLy: number; scale: number; cat?: Category | null; rl?: { key: string; i: number } }
+interface Marker { id: string; name: string; kind: string; real: Vec3; disp: THREE.Vector3; layer: 'cat' | 'sol' | 'real' | 'live'; obj?: CatObj; live?: LiveEvent; distLy: number; scale: number; cat?: Category | null; rl?: { key: string; i: number } }
 
 /** "Show only this": a region of space around one object, or one kind of object across the whole universe. */
 export type Isolation =
@@ -149,6 +151,13 @@ export class MapView implements View {
   private iso: Isolation | null = null;
   private baseSizes = new Map<string, Float32Array>();
   private pointCats = new Map<string, (Category | null)[]>();
+  /** Live view: locked to the real clock and to observed data only. */
+  live = false;
+  private liveVersion = -1;
+  private liveLayer!: Layer;
+  private liveIds: string[] = [];
+  private skyCache = new Map<string, number>();
+  private lastSolarTick = 0;
   private flows: { id: string; line: THREE.Line; real: Float64Array; tip: THREE.Vector3; label: string; info: string }[] = [];
 
   constructor(universe: UniverseField, cosmo: CosmoParams) {
@@ -167,6 +176,7 @@ export class MapView implements View {
     this.buildWeb(cosmo);
     this.buildRings();
     this.buildFlows();
+    this.liveLayer = this.makeLayer('live', 256);
     this.group.add(this.real.group);
     this.cmb = new THREE.Mesh(new THREE.SphereGeometry(1, 160, 80), new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent: true, opacity: 0.85, depthWrite: false }));
     this.cmb.renderOrder = -10;
@@ -510,9 +520,9 @@ export class MapView implements View {
   }
 
   /** Statistically CMB-like anisotropies (NOT the real Planck map) + optional real dipole and Cold Spot. */
-  colorCMB(dipole: boolean, palette: string, brightness: number) {
+  colorCMB(dipole: boolean, palette: string, brightness: number, realOnly = false) {
 
-    this.cmbStyle = `${dipole}:${palette}:${brightness.toFixed(3)}`;
+    this.cmbStyle = `${dipole && !realOnly ? dipole : this.physics?.mapDipole ?? dipole}:${palette}:${brightness.toFixed(3)}:${realOnly}`;
     const geo = this.cmb.geometry;
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
     if (!this.cmbField) {
@@ -543,7 +553,7 @@ export class MapView implements View {
     const col = new Float32Array(pos.count * 3);
     const range = dipole ? 3500 : 300;
     for (let i = 0; i < pos.count; i++) {
-      let uK = this.cmbField[i];
+      let uK = realOnly ? 0 : this.cmbField[i]; // live view: only the measured dipole, not the illustrative pattern
       if (dipole) uK += CMB_DIPOLE.amplitudeUK * (pos.getX(i) * dip[0] + -pos.getZ(i) * dip[1] + pos.getY(i) * dip[2]);
       const c = cmbColor(Math.max(-1, Math.min(1, uK / range)), palette);
       col[i * 3] = c[0] * brightness; col[i * 3 + 1] = c[1] * brightness; col[i * 3 + 2] = c[2] * brightness;
@@ -558,8 +568,15 @@ export class MapView implements View {
     this.physics = p;
     this.setCosmology({ H0: p.H0, omegaM: p.omegaM, omegaL: p.omegaL, gMult: p.gMult });
     const style = `${p.mapDipole}:${p.cmbPalette}:${p.cmbBrightness.toFixed(3)}`;
-    if (style !== this.cmbStyle) this.colorCMB(p.mapDipole, p.cmbPalette, p.cmbBrightness);
-    if (ctx.simDt !== 0) { this.jd += ctx.simDt * DAYS_PER_SIM_S; this.updateSolar(); }
+    if (`${style}:${this.live}` !== this.cmbStyle) this.colorCMB(p.mapDipole || this.live, p.cmbPalette, p.cmbBrightness, this.live);
+    if (this.live) {
+      // real clock: positions for this very moment
+      const now = performance.now();
+      if (now - this.lastSolarTick > 250) { this.lastSolarTick = now; this.jd = julianDate(new Date()); this.updateSolar(); }
+    } else if (ctx.simDt !== 0) { this.jd += ctx.simDt * DAYS_PER_SIM_S; this.updateSolar(); }
+    this.updateStarEpoch();
+    if (liveStore.version !== this.liveVersion) this.syncLive();
+    this.updateLive(p);
     if (this.travel) {
       const t = this.travel;
       t.t = Math.min(t.t + ctx.dtReal / t.dur, 1);
@@ -575,13 +592,15 @@ export class MapView implements View {
     if (this.dirty) this.remap();
     const show = (k: string, on: boolean) => { const L = this.layers.get(k); if (L) L.points.visible = on; };
     const iso = this.iso, catMode = iso?.kind === 'category', proc = !catMode;
-    show('solar', proc); show('belts', proc && p.mapSolar); show('local', proc && p.mapStars); show('catNear', p.mapStars || catMode);
-    show('mw', proc && p.mapMilkyWay); show('catFar', p.mapGalaxies || catMode); show('members', proc && p.mapStructures); show('web', proc && p.mapWeb);
+    const made = proc && !this.live; // procedural layers never appear in the live view
+    show('solar', proc); show('belts', proc && p.mapSolar); show('local', made && p.mapStars); show('catNear', p.mapStars || catMode);
+    show('mw', made && p.mapMilkyWay); show('catFar', p.mapGalaxies || catMode); show('members', made && p.mapStructures); show('web', made && p.mapWeb);
+    show('live', proc && p.mapLive);
     const sunIn = !iso || (iso.kind === 'region' && Math.hypot(...iso.center) <= iso.radius);
     for (const o of this.orbitLines) o.line.visible = p.mapSolar && sunIn;
     for (const r of this.rings) r.line.visible = p.mapRings;
-    for (const f of this.flows) f.line.visible = p.mapFlows && !iso;
-    this.real.setVisible((L) => (L.simulated ? p.mapSimulated : p.mapReal) && (!catMode || L.category === (iso as { cat: Category }).cat));
+    for (const f of this.flows) f.line.visible = p.mapFlows && !iso && !(this.live && f.id === 'flow:dark');
+    this.real.setVisible((L) => (L.simulated ? p.mapSimulated && !this.live : p.mapReal) && (!catMode || L.category === (iso as { cat: Category }).cat));
     this.cmb.visible = p.mapCMB && !iso;
     const inside = this.camDist < this.cmb.scale.x;
     (this.cmb.material as THREE.MeshBasicMaterial).opacity = inside ? 1 : 0.25;
@@ -612,6 +631,7 @@ export class MapView implements View {
   private targetOf(id: string): { real: Vec3; scale: number } | null {
     const m = this.markerIndex.get(id);
     if (m) return { real: m.real, scale: m.scale };
+    if (id.startsWith('live:')) return null;
     if (id.startsWith('rl:')) {
       const r = parseRl(id), p = this.real.position(r.key, r.i), L = this.real.entries.get(r.key)?.layer;
       if (!p || !L) return null;
@@ -682,7 +702,9 @@ export class MapView implements View {
     if (!p) return true;
     if (!this.passesIso(m)) return false;
     if (m.layer === 'real') { const e = this.real.entries.get(m.rl!.key); return !!e && e.points.visible; }
+    if (m.layer === 'live') return p.mapLive && m.live!.kind !== 'flare' && this.liveValid(m.live!);
     if (m.layer === 'sol') return true;
+    if (m.obj?.kind === 'probe' && liveStore.events.has('sc:-31')) return false; // the live position replaces the fixed one
     if (this.iso) return true;
     const k = m.obj!.kind;
     if (k === 'star' || k === 'cluster' || k === 'nebula' || k === 'blackhole') return m.distLy < 1e5 ? p.mapStars : true;
@@ -706,6 +728,7 @@ export class MapView implements View {
 
   info(id: string): SelectionInfo | null {
     const cosmo = this.cosmoParams();
+    if (id.startsWith('live:')) return this.liveInfo(id);
     if (id.startsWith('rl:')) return this.realInfo(id);
     if (id.startsWith('flow:')) {
       const f = this.flows.find((x) => x.id === id);
@@ -721,6 +744,11 @@ export class MapView implements View {
         { k: 'Light takes', v: fmtTime(fromEarth * 3.15576e7) },
       ]);
       rows.push({ k: 'Date (positions)', v: dateFromJD(this.jd).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' });
+      if (bodyId === 'sun') {
+        const fl = liveStore.list('flare')[0];
+        if (liveStore.solar.xray) rows.push({ k: 'X-ray level now (GOES)', v: liveStore.solar.xray });
+        if (fl) rows.push({ k: 'Latest flare', v: `${fl.name.replace(' solar flare', '')} · ${ago(fl.time)}` });
+      }
       return {
         id, name: m.name, kind: m.kind,
         info: bodyId === 'sun' ? 'Our star. Everything in this map is placed by its real direction and distance from here; only the radius is compressed logarithmically.'
@@ -784,6 +812,7 @@ export class MapView implements View {
       case 'preset': return 'Open this system';
       case 'solar': return 'Open the Solar System';
       case 'nucleus': return 'Approach the black hole';
+      case 'host': return 'Open its real orbits';
       default: return null;
     }
   }
@@ -816,6 +845,7 @@ export class MapView implements View {
     const lo = this.camDist * 0.12, hi = this.camDist * 1.5;
     const rank = (m: Marker): number => {
       if (m.layer === 'sol') return m.kind === 'Planet' || m.id === 'sol:sun' ? 0 : m.id === 'sol:moon' ? 1 : 3;
+      if (m.layer === 'live') return m.live!.kind === 'flare' || m.live!.kind === 'iss' ? 9 : 0.6 + Math.min((Date.now() - m.live!.time) / 864e5 / 30, 2);
       if (m.layer === 'real') {
         const L = this.real.entries.get(m.rl!.key)?.layer;
         const base: Partial<Record<Category, number>> = { superclusters: 0.5, groups: 1.6, galaxies: 1.8, blackholes: 1.5, clusters: 2.3, nebulae: 2.4, stars: 2.2, quasars: 2.6, pulsars: 2.8, exoplanets: 2.5 };
@@ -842,12 +872,12 @@ export class MapView implements View {
       const major = m.id === 'sol:sun' || m.id === 'sol:earth' || m.obj?.kind === 'supercluster';
       out.push({
         id: m.id, text: m.id === 'sol:sun' && this.isAtSun() ? 'Sun · you are here' : m.name,
-        cls: major ? 'major' : m.layer === 'sol' && m.kind !== 'Planet' ? 'minor tiny' : 'minor',
+        cls: major ? 'major' : m.layer === 'live' ? 'minor live' : m.layer === 'sol' && m.kind !== 'Planet' ? 'minor tiny' : 'minor',
         pos: () => m.disp,
         visible: () => { void R; return this.labelSet.has(m.id); },
       });
     }
-    for (const f of this.flows) out.push({ id: f.id, text: f.label, cls: f.id === 'flow:dark' ? 'minor ring' : 'minor', pos: () => f.tip, visible: () => !!this.physics?.mapFlows && !this.iso });
+    for (const f of this.flows) out.push({ id: f.id, text: f.label, cls: f.id === 'flow:dark' ? 'minor ring' : 'minor', pos: () => f.tip, visible: () => !!this.physics?.mapFlows && !this.iso && !(this.live && f.id === 'flow:dark') });
     for (const r of this.rings) out.push({ id: `ring:${r.label}`, text: r.label, cls: 'minor tiny ring', pos: () => r.pos, visible: () => !!this.physics?.mapRings });
     const cmbPos = new THREE.Vector3(0, 0, 0);
     out.push({ id: 'ring:cmb', text: 'Cosmic microwave background (edge of what we can see)', cls: 'minor ring', pos: () => cmbPos.set(0, this.cmb.scale.x * 0.98, 0), visible: () => !!this.physics?.mapCMB && !this.iso });
@@ -861,7 +891,7 @@ export class MapView implements View {
     void p;
     return {
       rows: [
-        { k: 'Date', v: dateFromJD(this.jd).toISOString().slice(0, 10) },
+        this.live ? { k: 'Now', v: dateFromJD(this.jd).toISOString().slice(0, 19).replace('T', ' ') + ' UTC' } : { k: 'Date', v: dateFromJD(this.jd).toISOString().slice(0, 10) },
         { k: 'Viewpoint', v: near },
         { k: 'Zoom scale', v: fmtLy(scale) },
         { k: 'Edge of observable universe', v: fmtLy(this.horizonLy) + ' (comoving)' },
@@ -869,6 +899,7 @@ export class MapView implements View {
         { k: 'Galaxies form beyond', v: `${fmtLy(this.dawnLy)} → dark ages` },
         { k: 'Points drawn', v: drawn.toLocaleString('en-US') },
         { k: 'Real catalogue objects loaded', v: [...dataStore.layers.values()].filter((L) => !L.simulated).reduce((a, L) => a + L.n, 0).toLocaleString('en-US') },
+        { k: 'Live events on the map', v: String(this.markers.filter((m) => m.layer === 'live' && this.markerVisible(m)).length) },
         ...(this.iso ? [{ k: 'Showing only', v: this.iso.label }] : []),
       ],
     };
@@ -943,6 +974,7 @@ export class MapView implements View {
     if (!h) return { kind: 'none' };
     const { L, i } = h, name = L.names[i], type = L.types[i];
     if (L.simulated) return { kind: 'none' };
+    if (L.key === 'nasaexo') return { kind: 'host', name: L.details.Host?.[i] ?? name, layerKey: L.key };
     if (L.category === 'blackholes' && /sgr ?a\*/i.test(name)) return { kind: 'nucleus' };
     if (L.category === 'stars') {
       let cls = (L.details['Spectral type']?.[i] ?? '').trim()[0];
@@ -1055,6 +1087,113 @@ export class MapView implements View {
     return this.markers.filter((m) => m.cat === cat && m.name)
       .sort((a, b) => a.distLy - b.distLy).slice(0, limit)
       .map((m) => ({ id: m.id, name: m.name, kind: m.kind, group: m.layer === 'cat' ? 'Highlights' : (this.real.entries.get(m.rl!.key)?.layer.title ?? ''), distLy: m.distLy }));
+  }
+
+  // ───────────────────────── live events ─────────────────────────
+
+  setLive(on: boolean) { this.live = on; this.cmbStyle = ''; this.labelsVersion++; if (on) { this.jd = julianDate(new Date()); this.updateSolar(); } }
+
+  private lastYear = NaN;
+  /** Stars move with their measured proper motion and radial velocity to the current date. */
+  private updateStarEpoch() {
+    const year = 2000 + (this.jd - 2451545) / 365.25;
+    this.real.setYear(year);
+    if (Math.abs(year - this.lastYear) < 0.01) return;
+    this.lastYear = year;
+    for (const m of this.markers) if (m.layer === 'real') { const p = this.real.position(m.rl!.key, m.rl!.i); if (p) { m.real = p; this.mapPoint(p, m.disp); } }
+  }
+
+  /** Spacecraft / asteroid / ISS positions are only known near the present. */
+  private liveValid(e: LiveEvent): boolean {
+    if (!e.helio && !e.geo) return true;
+    return Math.abs(this.jd - julianDate(new Date())) < 2;
+  }
+
+  private syncLive() {
+    this.liveVersion = liveStore.version;
+    const evsNow = liveStore.list().slice(0, 256);
+    if (evsNow.map((e) => e.id).join('|') === this.liveIds.join('|')) {
+      for (const e of evsNow) { const m = this.markerIndex.get(`live:${e.id}`); if (m) m.live = e; } // same events, fresher data
+      return;
+    }
+    this.markers = this.markers.filter((m) => m.layer !== 'live');
+    for (const id of [...this.markerIndex.keys()]) if (id.startsWith('live:')) this.markerIndex.delete(id);
+    const evs = liveStore.list().slice(0, 256);
+    this.liveIds = evs.map((e) => e.id);
+    const L = this.liveLayer;
+    const COL: Record<string, number> = { spacecraft: 0x7fffa0, neo: 0xffb36b, supernova: 0xff6a4a, gw: 0xd08cff, iss: 0xffffff, flare: 0xffe08a };
+    L.size.fill(0);
+    evs.forEach((e, i) => {
+      L.col.set(hexRGB(COL[e.kind] ?? 0xffffff), i * 3);
+      const m: Marker = { id: `live:${e.id}`, name: e.name, kind: e.type, real: [0, 0, 0], disp: new THREE.Vector3(), layer: 'live', live: e, distLy: 0, scale: e.kind === 'iss' ? 1e-9 : e.helio ? 2e-6 : 1e5, cat: null };
+      this.markers.push(m);
+      this.markerIndex.set(m.id, m);
+    });
+    (L.points.geometry.getAttribute('aColor') as THREE.BufferAttribute).needsUpdate = true;
+    this.labelsVersion++;
+  }
+
+  private livePos(e: LiveEvent): Vec3 | null {
+    if (e.helio) {
+      const dt = this.jd - e.helio.jd, a = e.helio.pos, v = e.helio.vel;
+      return eclAUtoGalLy([a[0] + v[0] * dt, a[1] + v[1] * dt, a[2] + v[2] * dt]);
+    }
+    if (e.geo) {
+      const earth = this.markerIndex.get('sol:earth')!.real;
+      const r = (6371 + e.geo.altKm) / 9.4607304725808e12; // km → ly
+      const g = eqToGalactic(fromRaDec(((e.geo.lon + gmstDeg(this.jd)) % 360 + 360) % 360, e.geo.lat));
+      return [earth[0] + g[0] * r, earth[1] + g[1] * r, earth[2] + g[2] * r];
+    }
+    if (e.sun) return [0, 0, 0];
+    if (e.sky) {
+      let d = e.sky.distLy;
+      if (d === undefined && e.sky.dLMpc) {
+        const key = `${e.id}:${this.cosmoKey}`;
+        d = this.skyCache.get(key);
+        if (d === undefined) { d = comovingFromLuminosity(e.sky.dLMpc * LY_PER_MPC, this.cosmoParams()); this.skyCache.set(key, d); }
+      }
+      if (!d) return null;
+      const g = eqToGalactic(fromRaDec(e.sky.ra, e.sky.dec));
+      return [g[0] * d, g[1] * d, g[2] * d];
+    }
+    return null;
+  }
+
+  private updateLive(p: PhysicsParams) {
+    if (!p.mapLive) return;
+    const L = this.liveLayer, t = performance.now() / 1000;
+    for (let i = 0; i < this.liveIds.length; i++) {
+      const m = this.markerIndex.get(`live:${this.liveIds[i]}`);
+      if (!m) continue;
+      const e = m.live!;
+      const pos = this.liveValid(e) ? this.livePos(e) : null;
+      if (!pos) { L.size[i] = 0; continue; }
+      m.real = pos; m.distLy = Math.hypot(...pos);
+      L.real[i * 3] = pos[0]; L.real[i * 3 + 1] = pos[1]; L.real[i * 3 + 2] = pos[2];
+      const fresh = Date.now() - e.time < 3 * 864e5 && (e.kind === 'supernova' || e.kind === 'gw');
+      const base = e.kind === 'flare' ? 0 : e.kind === 'gw' ? 9 : e.kind === 'supernova' ? 6 : e.kind === 'spacecraft' ? 5.5 : 4.5;
+      L.size[i] = base * (fresh ? 1 + 0.45 * Math.sin(t * 3 + i) : 1);
+      this.mapPoint(pos, m.disp);
+    }
+    this.remapLayer(L);
+    (L.points.geometry.getAttribute('aSize') as THREE.BufferAttribute).needsUpdate = true;
+  }
+
+  private liveInfo(id: string): SelectionInfo | null {
+    const m = this.markerIndex.get(id);
+    const e = m?.live;
+    if (!m || !e) return null;
+    const pos = this.livePos(e);
+    const rows: InfoRow[] = e.rows.map(([k, v]) => ({ k, v }));
+    rows.unshift({ k: e.kind === 'neo' ? 'Closest approach' : e.kind === 'spacecraft' || e.kind === 'iss' ? 'Position for' : 'When', v: e.kind === 'spacecraft' || e.kind === 'iss' ? 'now' : ago(e.time) });
+    if (e.sky?.note) rows.push({ k: 'Placement', v: e.sky.note, tone: 'warn' });
+    rows.push({ k: 'Source', v: e.source });
+    if (!this.liveValid(e)) rows.push({ k: 'Note', v: 'Positions are only known for the present — set the date to now to see it.', tone: 'warn' });
+    return {
+      id, name: e.name, kind: e.type, info: e.summary,
+      rows: pos && !e.sun ? this.infoRows(pos, rows) : rows,
+      enterLabel: null, travelLabel: pos ? 'Fly here' : undefined, editable: false,
+    };
   }
 
   getState() { return { center: [...this.center] as Vec3, jd: this.jd }; }

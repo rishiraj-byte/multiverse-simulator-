@@ -149,6 +149,7 @@ export function DataPanel({ engine, physics: p, setPhysics }: { engine: Engine |
                       {s.title}
                       {s.simulated && <span className="ml-1.5 rounded bg-[#ffc46a]/20 px-1 font-hud text-[10.5px] text-[#ffc46a]">MODEL</span>}
                       {s.recommended && !s.simulated && <span className="ml-1.5 font-hud text-[10.5px] text-[#5fe0a0]">★</span>}
+                      {s.desktopOnly && <span className="ml-1.5 rounded bg-[#8fd8ff]/15 px-1 font-hud text-[10.5px] text-[#8fd8ff]">DESKTOP APP</span>}
                     </div>
                     <p className="text-[11.5px] leading-snug text-[#c4bef0]">{s.what} · {s.size}</p>
                   </div>

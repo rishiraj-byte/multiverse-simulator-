@@ -59,7 +59,7 @@ class DataStore {
     // simulated layers depend on what else is loaded → always regenerate
     if (!force && !def.simulated) {
       const c = await cacheGet(key);
-      if (c && c.n > 0) { this.layers.set(key, c); this.set(key, { status: 'ready', cached: true, msg: `${c.n.toLocaleString('en-US')} objects (saved copy from ${c.loadedAt.slice(0, 10)})` }); return c; }
+      if (c && c.n > 0 && (c.schema ?? 1) === (def.schema ?? 1)) { this.layers.set(key, c); this.set(key, { status: 'ready', cached: true, msg: `${c.n.toLocaleString('en-US')} objects (saved copy from ${c.loadedAt.slice(0, 10)})` }); return c; }
     }
     const ac = new AbortController();
     this.aborts.set(key, ac);
@@ -99,8 +99,8 @@ class DataStore {
   /** Load the recommended set in a sensible order (galaxies before the dark-matter halos that surround them). */
   async loadRecommended(cosmo: CosmoParams) {
     // three chains in parallel; order inside a chain matters for de-duplication (HYG before Gaia; UNGC → CF4 → 2MRS)
-    const chains = [['hyg', 'gaia9'], ['ungc', 'cf4', '2mrs', 'abell', 'scg'], ['exo', 'bh', 'psr', 'oc', 'gc', 'neb', 'qso']];
-    await Promise.all(chains.map(async (c) => { for (const k of c) await this.load(k, cosmo); }));
+    const chains = [['hyg', 'gaia9', 'yso'], ['ungc', 'cf4', '2mrs', 'abell', 'scg'], ['nasaexo', 'bh', 'psr', 'oc', 'gc', 'neb', 'qso']];
+    await Promise.all(chains.map(async (c) => { for (const k of c) { const L = await this.load(k, cosmo); if (!L && k === 'nasaexo') await this.load('exo', cosmo); } }));
     for (const s of SOURCES.filter((x) => x.recommended && x.simulated)) await this.load(s.key, cosmo, true);
   }
 
@@ -110,7 +110,8 @@ class DataStore {
     for (const k of ks.map(String)) {
       if (this.layers.has(k) || !this.source(k)) continue;
       const c = await cacheGet(k);
-      if (c && c.n > 0) { this.layers.set(k, c); this.state.set(k, { status: 'ready', cached: true, msg: `${c.n.toLocaleString('en-US')} objects (saved copy from ${c.loadedAt.slice(0, 10)})` }); }
+      if (c && c.n > 0 && (c.schema ?? 1) === (this.source(k)?.schema ?? 1)) { this.layers.set(k, c); this.state.set(k, { status: 'ready', cached: true, msg: `${c.n.toLocaleString('en-US')} objects (saved copy from ${c.loadedAt.slice(0, 10)})` }); }
+      else { this.cachedKeys.delete(k); void cacheDel(k); } // saved in an older format: download again
     }
     this.emit();
   }

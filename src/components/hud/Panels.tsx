@@ -20,8 +20,8 @@ const COSMO_PRESETS = [
   { label: 'Dark-energy dominated', p: { H0: 70, omegaM: 0.05, omegaL: 0.95 } },
 ];
 
-export function SimPanel({ physics: p, setPhysics, ctx, stats, engine }: {
-  physics: PhysicsParams; setPhysics: SetPhysics; ctx: WorldContext; stats: LevelStats | null; engine: Engine | null;
+export function SimPanel({ physics: p, setPhysics, ctx, stats, engine, live }: {
+  physics: PhysicsParams; setPhysics: SetPhysics; ctx: WorldContext; stats: LevelStats | null; engine: Engine | null; live?: boolean;
 }) {
   return (
     <div className="space-y-4">
@@ -32,7 +32,8 @@ export function SimPanel({ physics: p, setPhysics, ctx, stats, engine }: {
         </Section>
       )}
 
-      {ctx.level === 'map' && <MapControls physics={p} setPhysics={setPhysics} engine={engine} />}
+      {ctx.level === 'map' && <MapControls physics={p} setPhysics={setPhysics} engine={engine} live={live} />}
+      {live && <p className="text-[12px] leading-relaxed text-[#c4bef0]">The live universe uses the measured laws of physics and cosmology (Planck 2018) and the real clock; they can’t be changed here. Use “⑂ Copy to sandbox” to experiment.</p>}
 
       {(ctx.level === 'system' || ctx.level === 'planet') && (
         <Section title="Gravity" hint="Newtonian N-body · F = G·m₁m₂ / (r² + ε²)">
@@ -71,15 +72,15 @@ export function SimPanel({ physics: p, setPhysics, ctx, stats, engine }: {
         </Section>
       )}
 
-      <Section title="Clocks per scale" hint="The time bar multiplies all of these. Physics is unchanged — only how fast you watch it.">
+      {!live && <Section title="Clocks per scale" hint="The time bar multiplies all of these. Physics is unchanged — only how fast you watch it.">
         <SliderRow label="Galactic clock" value={Math.log10(p.galaxyRate)} min={-1} max={2} step={0.01} display={`${p.galaxyRate.toPrecision(3)} Myr / sim-s`} onChange={(v) => setPhysics({ galaxyRate: Math.pow(10, v) })} />
         <SliderRow label="Cosmic clock" value={Math.log10(p.cosmicRate)} min={-3} max={0} step={0.01} display={`${p.cosmicRate.toPrecision(3)} Gyr / sim-s`} onChange={(v) => setPhysics({ cosmicRate: Math.pow(10, v) })} />
         <SliderRow label="Moon clock" value={p.moonRate} min={0} max={5} step={0.05} display={`${p.moonRate.toFixed(2)} ×`} onChange={(v) => setPhysics({ moonRate: v })} />
-      </Section>
+      </Section>}
 
-      <Btn className="w-full" onClick={() => setPhysics({ ...DEFAULT_PHYSICS, labels: p.labels, habitableZone: p.habitableZone, trails: p.trails, trailLength: p.trailLength, belts: p.belts })}>
+      {!live && <Btn className="w-full" onClick={() => setPhysics({ ...DEFAULT_PHYSICS, labels: p.labels, habitableZone: p.habitableZone, trails: p.trails, trailLength: p.trailLength, belts: p.belts })}>
         Restore default physics
-      </Btn>
+      </Btn>}
     </div>
   );
 }
@@ -96,16 +97,17 @@ const LAYERS: { key: keyof PhysicsParams; label: string; hint?: string }[] = [
   { key: 'mapCMB', label: 'Cosmic microwave background', hint: 'The farthest light: last scattering, 45 billion ly' },
   { key: 'mapDipole', label: 'Show the real CMB dipole', hint: 'Our 370 km/s motion through the CMB (Planck 2018)' },
   { key: 'mapRings', label: 'Distance rings', hint: '1 AU → 10 billion ly, logarithmic' },
+  { key: 'mapLive', label: 'Live events', hint: 'Spacecraft, asteroid flybys, supernovae, black-hole mergers — real-time feeds' },
 ];
 
-function MapControls({ physics: p, setPhysics, engine }: { physics: PhysicsParams; setPhysics: SetPhysics; engine: Engine | null }) {
+function MapControls({ physics: p, setPhysics, engine, live }: { physics: PhysicsParams; setPhysics: SetPhysics; engine: Engine | null; live?: boolean }) {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 16));
   return (
     <>
       <Section title="Travel" hint="Every object is at its real direction and distance from the viewpoint; the radius is logarithmic (R ∝ log d), so planets and the edge of the universe fit in one view.">
         <div className="grid grid-cols-2 gap-2">
           <Btn tone="primary" onClick={() => engine?.mapHome()}>Back to the Sun</Btn>
-          <Btn onClick={() => engine?.openExpansion()}>Cosmic expansion sim</Btn>
+          {!live && <Btn onClick={() => engine?.openExpansion()}>Cosmic expansion sim</Btn>}
         </div>
         <p className="text-[12px] leading-relaxed text-[#c4bef0]">Scroll to zoom from AU to billions of light-years. W A S D (Shift = faster) moves you through real space at a speed matched to the zoom. Select anything, then “Fly here” to move your viewpoint there.</p>
       </Section>
@@ -113,22 +115,22 @@ function MapControls({ physics: p, setPhysics, engine }: { physics: PhysicsParam
         <ToggleRow label="Fisheye lens" hint="True equidistant fisheye — up to the whole sky in one circle" checked={p.fisheye} onChange={(v) => setPhysics({ fisheye: v })} />
         {p.fisheye && <SliderRow label="Field of view" value={p.fisheyeFov} min={90} max={360} step={1} display={`${p.fisheyeFov.toFixed(0)}°`} onChange={(v) => setPhysics({ fisheyeFov: v })} />}
       </Section>
-      <Section title="Date" hint="Planets, the Moon and the Sun use real ephemerides (JPL elements, valid 1800–2050). The time bar runs 1 day per sim-second.">
+      {!live && <Section title="Date" hint="Planets, the Moon and the Sun use real ephemerides (JPL elements, valid 1800–2050). The time bar runs 1 day per sim-second.">
         <input type="datetime-local" value={date} onChange={(e: ChangeEvent<HTMLInputElement>) => setDate(e.target.value)} aria-label="Map date (UTC)"
           className="w-full rounded-md border border-[#9a92d9]/30 bg-[#050a21] px-2 py-1.5 font-hud text-[12px] text-[#f1e9dd] outline-none focus:border-[#8642ff]" />
         <div className="grid grid-cols-2 gap-2">
           <Btn onClick={() => { const d = new Date(date + 'Z'); if (!isNaN(d.getTime())) engine?.setMapDate(d); }}>Set date (UTC)</Btn>
           <Btn onClick={() => { const n = new Date(); setDate(n.toISOString().slice(0, 16)); engine?.setMapDate(n); }}>Now</Btn>
         </div>
-      </Section>
+      </Section>}
       <Section title="Microwave background colour" hint="Same real physics, different colours. Brightness 0 hides it behind the galaxies.">
         <Segmented label="CMB colours" value={p.cmbPalette as 'deep' | 'planck' | 'infrared' | 'mono'}
           options={[{ id: 'deep', label: 'Night' }, { id: 'planck', label: 'Planck' }, { id: 'infrared', label: 'Infrared' }, { id: 'mono', label: 'Grey' }]}
           onChange={(v) => setPhysics({ cmbPalette: v, cmbBrightness: v === 'planck' && p.cmbBrightness < 0.4 ? 0.45 : p.cmbBrightness })} />
         <SliderRow label="Brightness" value={p.cmbBrightness} min={0} max={1} step={0.01} display={`${Math.round(p.cmbBrightness * 100)} %`} onChange={(v) => setPhysics({ cmbBrightness: v })} />
       </Section>
-      <Section title="Layers">
-        {LAYERS.map((l) => <ToggleRow key={l.key} label={l.label} hint={l.hint} checked={!!p[l.key]} onChange={(v) => setPhysics({ [l.key]: v } as Partial<PhysicsParams>)} />)}
+      <Section title="Layers" hint={live ? 'Generated layers (Milky Way sample, cluster members, cosmic web) never appear in the live view.' : undefined}>
+        {LAYERS.filter((l) => !live || !['mapMilkyWay', 'mapStructures', 'mapWeb'].includes(l.key)).map((l) => <ToggleRow key={l.key} label={l.label} hint={l.hint} checked={!!p[l.key]} onChange={(v) => setPhysics({ [l.key]: v } as Partial<PhysicsParams>)} />)}
       </Section>
     </>
   );

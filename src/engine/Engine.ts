@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { DEFAULT_PHYSICS, type PhysicsParams } from '../sim/physics';
-import { getPreset, proceduralSystem, smbhSystem, type SystemDef, type SystemSnapshot, type BodyDef } from '../sim/systems';
+import { getPreset, proceduralSystem, smbhSystem, catalogSystem, type SystemDef, type SystemSnapshot, type BodyDef, type CatalogHost } from '../sim/systems';
 import { REAL_LAWS, deriveLaws, type Laws, type Derived } from '../sim/laws';
 import type { ClockState } from '../sim/cosmology';
 import { MILKY_WAY, type GalaxyParams } from '../sim/galaxy';
@@ -274,6 +274,7 @@ export class Engine {
   systemIdentity(): string { return this.systemKey; }
 
   setLaws(l: Partial<Laws>) {
+    if (this.live) return; // the live universe always uses the measured laws of physics
     this.laws = { ...this.laws, ...l };
     this.derived = deriveLaws(this.laws, this.physics.gMult);
   }
@@ -474,6 +475,7 @@ export class Engine {
   enterSelected() {
     const id = this.selectedId;
     if (!id) return;
+    if (this.live) { this.ev.onToast('The live view stays on the real map. Use “⑂ Copy to sandbox” to open systems and galaxies.'); return; }
     if (this.level === 'map') { this.runMapAction(this.map.action(id)); return; }
     if (this.level === 'universe') { const i = this.universe.indexOf(id); if (i >= 0) this.enterGalaxy(i); }
     else if (this.level === 'galaxy' && this.galaxy) {
@@ -493,6 +495,12 @@ export class Engine {
       case 'star': this.warpTo(() => { this.ensureGalaxy(0); this.setSystem(() => proceduralSystem({ seed: a.entry.seed, name: a.entry.name, cls: a.entry.cls }), `star:0:${a.entry.seed}`); this.showLevel('system'); }); break;
       case 'preset': this.warpTo(() => { this.ensureGalaxy(0); this.setSystem(() => getPreset(a.id)!, `preset:${a.id}`); this.showLevel('system'); }); break;
       case 'nucleus': this.warpTo(() => { this.ensureGalaxy(0); this.setSystem(() => getPreset('sgra')!, 'nucleus:0'); this.showLevel('system'); }); break;
+      case 'host': {
+        const host = hostFromLayer(a.layerKey, a.name);
+        if (!host) { this.ev.onToast('No orbit data for this system.'); break; }
+        this.warpTo(() => { this.ensureGalaxy(0); this.setSystem(() => catalogSystem(host), `host:${a.name}`); this.showLevel('system'); });
+        break;
+      }
       case 'solar': {
         const body = a.bodyId;
         this.warpTo(() => {
@@ -569,7 +577,25 @@ export class Engine {
   }
 
   mapHome() { if (this.level === 'map') { this.map.resetCenter(); this.mapZoomTarget = 300; } else this.goToLevel('map'); }
-  openExpansion() { this.warpTo(() => this.showLevel('universe')); }
+  openExpansion() { if (this.live) { this.ev.onToast('The expansion simulator is in the sandbox.'); return; } this.warpTo(() => this.showLevel('universe')); }
+
+  // ── live universe ──
+  live = false;
+  private suspended = false;
+  /** Lock this universe to the real clock and measured data; editing is switched off. */
+  setLive(on: boolean) {
+    this.live = on;
+    this.map.setLive(on);
+    if (on) {
+      Object.assign(this.physics, { H0: DEFAULT_PHYSICS.H0, omegaM: DEFAULT_PHYSICS.omegaM, omegaL: DEFAULT_PHYSICS.omegaL, gMult: 1, timeWarp: 1, paused: false, reverse: false, darkMatter: 1 });
+      this.laws = { ...REAL_LAWS };
+      this.derived = deriveLaws(this.laws, 1);
+      if (this.level !== 'map') this.goToLevel('map');
+      this.ev.onPhysics({ ...this.physics });
+    }
+  }
+  /** Skip rendering while this universe's tab is hidden. */
+  setSuspended(on: boolean) { this.suspended = on; if (!on) this.lastFrame = 0; }
   setMapDate(d: Date) { this.map.setDate(d); }
   private mapZoomTarget: number | null = null;
 
@@ -711,6 +737,7 @@ export class Engine {
   }
 
   setPhysics(p: Partial<PhysicsParams>) {
+    if (this.live) p = Object.fromEntries(Object.entries(p).filter(([k]) => LIVE_EDITABLE.has(k as keyof PhysicsParams))) as Partial<PhysicsParams>;
     Object.assign(this.physics, p);
     if (p.gMult !== undefined) this.derived = deriveLaws(this.laws, this.physics.gMult);
   }
@@ -783,10 +810,10 @@ export class Engine {
       this.keys.add(e.code);
       switch (e.code) {
         case 'Escape': if (this.pendingSpawn) this.cancelPlacement(); else this.select(null); break;
-        case 'Space': e.preventDefault(); this.patchPhysics({ paused: !this.physics.paused }); break;
-        case 'BracketLeft': this.patchPhysics({ timeWarp: Math.max(this.physics.timeWarp / 2, 0.1) }); break;
-        case 'BracketRight': this.patchPhysics({ timeWarp: Math.min(this.physics.timeWarp * 2, 200) }); break;
-        case 'Backslash': this.patchPhysics({ reverse: !this.physics.reverse }); break;
+        case 'Space': e.preventDefault(); if (!this.live) this.patchPhysics({ paused: !this.physics.paused }); break;
+        case 'BracketLeft': if (!this.live) this.patchPhysics({ timeWarp: Math.max(this.physics.timeWarp / 2, 0.1) }); break;
+        case 'BracketRight': if (!this.live) this.patchPhysics({ timeWarp: Math.min(this.physics.timeWarp * 2, 200) }); break;
+        case 'Backslash': if (!this.live) this.patchPhysics({ reverse: !this.physics.reverse }); break;
         case 'KeyL': this.patchPhysics({ labels: !this.physics.labels }); break;
         case 'KeyC': this.toggleFocus(); break;
         case 'Enter': this.enterSelected(); break;
@@ -1062,6 +1089,7 @@ export class Engine {
     const dt = this.lastFrame ? Math.min((nowMs - this.lastFrame) / 1000, 0.05) : 0;
     this.lastFrame = nowMs;
 
+    if (this.suspended) return;
     if (this.warping) this.updateWarp(dt);
     else if (this.level === 'map') this.updateMapCamera(dt);
     else this.updateCamera(dt);
@@ -1157,5 +1185,25 @@ function snapshotToDef(snap: SystemSnapshot): SystemDef {
     scale: { ...snap.system.scale },
     belts: snap.system.belts?.map((b: NonNullable<SystemDef['belts']>[number]) => ({ ...b })),
     bodies: snap.system.bodies.map((b: BodyDef): BodyDef => ({ ...b, pos: [b.pos[0], b.pos[1], b.pos[2]], vel: [b.vel[0], b.vel[1], b.vel[2]], kepler: b.kepler ? { ...b.kepler } : undefined })),
+  };
+}
+
+/** Physics settings that only change how the live universe is displayed, never what it contains. */
+const LIVE_EDITABLE = new Set<keyof PhysicsParams>([
+  'labels', 'trails', 'trailLength', 'habitableZone', 'belts', 'mapSolar', 'mapStars', 'mapMilkyWay', 'mapGalaxies', 'mapStructures', 'mapWeb',
+  'mapRings', 'mapCMB', 'mapDipole', 'mapReal', 'mapFlows', 'mapLive', 'cmbPalette', 'cmbBrightness', 'fisheye', 'fisheyeFov',
+]);
+
+/** Rebuild a planetary system from the NASA Exoplanet Archive layer (all planets of one host). */
+function hostFromLayer(layerKey: string, host: string): CatalogHost | null {
+  const L = dataStore.layers.get(layerKey);
+  if (!L) return null;
+  const d = L.details, n = (k: string, i: number) => { const v = Number(d[k]?.[i]); return d[k]?.[i] && isFinite(v) ? v : undefined; };
+  const idx = d.Host.map((h, i) => (h === host ? i : -1)).filter((i) => i >= 0);
+  if (!idx.length) return null;
+  const i0 = idx[0], distLy = Math.hypot(L.pos[i0 * 3], L.pos[i0 * 3 + 1], L.pos[i0 * 3 + 2]);
+  return {
+    name: host, starMass: n('Host mass (Suns)', i0), teff: n('Host temperature (K)', i0), starRad: n('Host radius (Suns)', i0), lumLog: n('Host luminosity (log L☉)', i0), distPc: distLy / 3.26156,
+    planets: idx.map((i) => ({ name: L.names[i], a: n('Orbit (AU)', i), periodDays: n('Period (days)', i), massE: n('Mass (Earths)', i), radE: n('Radius (Earths)', i), ecc: n('Eccentricity', i) })),
   };
 }

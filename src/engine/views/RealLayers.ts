@@ -16,6 +16,10 @@ interface Entry { layer: RealLayer; pos: Float32Array; points: THREE.Points; mat
 const VERT = `
   attribute vec3 aColor;
   attribute float aSize;
+  #ifdef HAS_VEL
+  attribute vec3 aVel;
+  uniform float uYears;
+  #endif
   uniform vec3 uCenter;
   uniform vec3 uIsoC;
   uniform float uIsoR;
@@ -28,8 +32,12 @@ const VERT = `
   #include <logdepthbuf_pars_vertex>
   void main() {
     vColor = aColor;
-    if (uIsoR > 0.0 && length(position - uIsoC) > uIsoR) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
-    vec3 v = position - uCenter;
+    vec3 p = position;
+    #ifdef HAS_VEL
+    p += aVel * uYears;   // real space motion since the catalogue epoch
+    #endif
+    if (uIsoR > 0.0 && length(p - uIsoC) > uIsoR) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
+    vec3 v = p - uCenter;
     float d = length(v);
     float R = uK * log(1.0 + d / uD0) * 0.4342944819;
     vec3 m = d > 0.0 ? v * (R / d) : vec3(0.0);
@@ -55,6 +63,7 @@ export class RealLayerSet {
   readonly entries = new Map<string, Entry>();
   private center: Vec3 = [0, 0, 0];
   private region: Region | null = null;
+  private year = 2000;
 
   private readonly K: number;
   private readonly D0: number;
@@ -91,12 +100,14 @@ export class RealLayerSet {
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('aColor', new THREE.BufferAttribute(layer.rgb, 3));
     geo.setAttribute('aSize', new THREE.BufferAttribute(layer.size, 1));
+    if (layer.vel) geo.setAttribute('aVel', new THREE.BufferAttribute(layer.vel, 3));
     const mat = new THREE.ShaderMaterial({
       uniforms: {
         uCenter: { value: new THREE.Vector3(...this.center) }, uIsoC: { value: new THREE.Vector3() }, uIsoR: { value: 0 },
         uK: { value: this.K }, uD0: { value: this.D0 }, uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) },
-        uSizeMul: { value: 1 }, uOpacity: { value: layer.simulated ? 0.55 : 1 },
+        uSizeMul: { value: 1 }, uOpacity: { value: layer.simulated ? 0.55 : 1 }, uYears: { value: 0 },
       },
+      defines: layer.vel ? { HAS_VEL: '' } : {},
       vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
     });
     const points = new THREE.Points(geo, mat);
@@ -123,7 +134,18 @@ export class RealLayerSet {
     else u.uIsoR.value = 0;
     // a region small enough to hold one object: draw it bigger so it is easy to find
     u.uSizeMul.value = this.region && this.region.radius < 5 ? 2.2 : 1;
+    u.uYears.value = this.yearsFor(e.layer);
   }
+
+  private yearsFor(L: RealLayer) { return L.vel && L.epoch ? this.year - L.epoch : 0; }
+
+  /** Move stars with their measured motion to this date (decimal year). */
+  setYear(y: number) {
+    if (Math.abs(y - this.year) < 1e-6) return;
+    this.year = y;
+    for (const e of this.entries.values()) e.mat.uniforms.uYears.value = this.yearsFor(e.layer);
+  }
+  get yearNow() { return this.year; }
 
   setCenter(c: Vec3) { this.center = [...c] as Vec3; for (const e of this.entries.values()) this.applyUniforms(e); }
   setRegion(r: Region | null) { this.region = r; for (const e of this.entries.values()) this.applyUniforms(e); }
@@ -133,6 +155,8 @@ export class RealLayerSet {
   position(key: string, i: number): Vec3 | null {
     const e = this.entries.get(key);
     if (!e || i < 0 || i >= e.layer.n) return null;
+    const v = e.layer.vel, t = this.yearsFor(e.layer);
+    if (v && t) return [e.pos[i * 3] + v[i * 3] * t, e.pos[i * 3 + 1] + v[i * 3 + 1] * t, e.pos[i * 3 + 2] + v[i * 3 + 2] * t];
     return [e.pos[i * 3], e.pos[i * 3 + 1], e.pos[i * 3 + 2]];
   }
 
@@ -149,10 +173,11 @@ export class RealLayerSet {
     let best: { key: string; i: number } | null = null, bestScore = Infinity;
     for (const [key, e] of this.entries) {
       if (!e.points.visible) continue;
-      const P = e.pos, n = e.layer.n;
+      const P = e.pos, n = e.layer.n, V = e.layer.vel, yrs = this.yearsFor(e.layer);
       const bonus = e.layer.simulated ? 6 : 0; // prefer real objects over simulated markers
       for (let i = 0; i < n; i++) {
-        const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
+        let x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
+        if (V && yrs) { x += V[i * 3] * yrs; y += V[i * 3 + 1] * yrs; z += V[i * 3 + 2] * yrs; }
         if (r && Math.hypot(x - r.center[0], y - r.center[1], z - r.center[2]) > r.radius) continue;
         const vx = x - cx, vy = y - cy, vz = z - cz, d = Math.sqrt(vx * vx + vy * vy + vz * vz);
         const k = d > 0 ? (this.K * Math.log10(1 + d / this.D0)) / d : 0;

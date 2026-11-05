@@ -34,6 +34,24 @@ serving the build from a private `app://` address — no localhost server).
 - **Explore tab** — search any name (plus live SIMBAD lookup), browse by kind, and **Show only** one
   object or one kind of object across the whole universe.
 
+## Live universe and Sandbox
+The app opens on two views (switch at the top left):
+- **Live universe** — read-only, locked to the real clock and measured data. Planets, moons,
+  12 spacecraft (JPL Horizons), the ISS and close-approach asteroids (JPL CAD) sit where they are
+  this second; HYG and Gaia stars are moved forward from their catalogue epoch by their measured
+  proper motion and radial velocity. The **Now** tab lists what observatories are reporting:
+  solar flares, X-ray level and Kp (NOAA SWPC), the SDO image of the Sun, new supernovae (ZTF via
+  ALeRCE; distances are rough standard-candle estimates) and gravitational-wave mergers (GraceDB,
+  placed at the most likely sky pixel and distance). Light delay means events are what has been
+  *detected*, not what is happening out there at this instant. Galaxies do not visibly move in a
+  human lifetime; planet formation is shown through catalogued young stars, not live.
+- **Sandbox** — the fully editable multiverse; the same live feeds can be shown on it
+  (Now tab → *Show live events on the map*). *Copy to sandbox* turns the live view into an editable copy.
+
+Some feeds (JPL, GraceDB, NASA Exoplanet Archive) need the desktop app, which adds the
+cross-origin header those archives do not send. SIMBAD/VizieR fall back to official mirrors
+(CfA Harvard, IUCAA, NAOJ, IDIA, NAOC) when Strasbourg cannot be reached.
+
 ## What's inside
 
 **Five scales, all linked by the same laws of physics**

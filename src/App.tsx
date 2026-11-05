@@ -9,9 +9,16 @@ import { Hud, type Multiverse } from './components/Hud';
 import { Lab } from './components/lab/Lab';
 import { Compare } from './components/Compare';
 import { dataStore } from './data/store';
+import { liveStore } from './data/live';
 
 // re-open catalogues saved on this computer by earlier sessions (no network needed)
 void dataStore.restoreCached();
+// start the real-time feeds (shared by the live universe and every sandbox)
+liveStore.start();
+
+type View = 'live' | 'sandbox';
+const VIEW_KEY = 'cosmos.view';
+const readView = (): View => { try { return localStorage.getItem(VIEW_KEY) === 'sandbox' ? 'sandbox' : 'live'; } catch { return 'live'; } };
 
 const INITIAL_CTX: WorldContext = {
   level: 'map', crumbs: [{ level: 'map', label: 'Observable universe' }],
@@ -19,13 +26,16 @@ const INITIAL_CTX: WorldContext = {
 };
 const MAX_UNIVERSES = 4;
 
-interface UniMeta { id: number; name: string; state?: EngineState }
+interface UniMeta { id: number; name: string; state?: EngineState; live?: boolean }
+const LIVE_META: UniMeta = { id: 0, name: 'Live universe', live: true };
 type Toast = (m: string) => void;
 
 export default function App() {
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [unis, setUnis] = useState<UniMeta[]>([{ id: 1, name: 'Universe A' }]);
   const [focus, setFocus] = useState(1);
+  const [view, setViewState] = useState<View>(readView);
+  const setView = useCallback((v: View) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* ignore */ } }, []);
   const [labOpen, setLabOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
   const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([]);
@@ -39,17 +49,17 @@ export default function App() {
   }, []);
 
   const fork = useCallback(() => {
-    const src = engines.current.get(focus);
+    const src = engines.current.get(view === 'live' ? 0 : focus);
     if (!src) return;
     if (unis.length >= MAX_UNIVERSES) { toast(`Up to ${MAX_UNIVERSES} parallel universes at once.`); return; }
     const id = nextId.current++;
     const letter = String.fromCharCode(64 + id);
-    const from = unis.find((u) => u.id === focus)?.name ?? 'universe';
+    const from = view === 'live' ? 'the live universe' : unis.find((u) => u.id === focus)?.name ?? 'universe';
     setUnis((u) => [...u, { id, name: `Universe ${letter}`, state: src.exportState() }]);
     setFocus(id);
-    setCompareOpen(true);
-    toast(`Forked ${from} → Universe ${letter}. Change anything in one; watch them diverge.`);
-  }, [focus, unis, toast]);
+    if (view === 'live') setView('sandbox'); else setCompareOpen(true);
+    toast(view === 'live' ? `Copied the live universe → Universe ${letter}. Everything is editable here.` : `Forked ${from} → Universe ${letter}. Change anything in one; watch them diverge.`);
+  }, [focus, unis, toast, view, setView]);
 
   const close = useCallback((id: number) => {
     setUnis((u) => {
@@ -68,20 +78,28 @@ export default function App() {
     list: unis.map((u) => ({ id: u.id, name: u.name })), focus,
     onFocus: setFocus, onFork: fork, onClose: close,
     onLab: () => setLabOpen(true), onCompare: () => setCompareOpen((v) => !v), compareOpen,
+    view, onView: setView,
   };
   const n = unis.length;
   const grid = n === 1 ? 'grid-cols-1' : n === 2 ? 'grid-cols-1 grid-rows-2 md:grid-cols-2 md:grid-rows-1' : 'grid-cols-2 grid-rows-2';
 
   return (
     <div ref={setRoot} className="fixed inset-0 overflow-hidden bg-[#020409]">
-      <div className={`absolute inset-0 grid gap-px bg-[#9a92d9]/20 ${grid}`}>
+      <div className={`absolute inset-0 ${view === 'live' ? '' : 'hidden'}`}>
+        <div className="absolute inset-0 grid grid-cols-1">
+          <UniversePane meta={LIVE_META} focused={view === 'live'} hidden={view !== 'live'} solo root={root}
+            onFocus={() => undefined} register={register} toast={toast} multiverse={multiverse}
+            labOpen={false} onCloseLab={() => setLabOpen(false)} />
+        </div>
+      </div>
+      <div className={`absolute inset-0 grid gap-px bg-[#9a92d9]/20 ${grid} ${view === 'sandbox' ? '' : 'hidden'}`}>
         {unis.map((u) => (
-          <UniversePane key={u.id} meta={u} focused={u.id === focus} solo={n === 1} root={root}
+          <UniversePane key={u.id} meta={u} focused={view === 'sandbox' && u.id === focus} hidden={view !== 'sandbox'} solo={n === 1} root={root}
             onFocus={() => setFocus(u.id)} register={register} toast={toast} multiverse={multiverse}
             labOpen={labOpen && u.id === focus} onCloseLab={() => setLabOpen(false)} />
         ))}
       </div>
-      {compareOpen && n > 1 && <Compare unis={unis} engines={engines.current} onClose={() => setCompareOpen(false)} />}
+      {view === 'sandbox' && compareOpen && n > 1 && <Compare unis={unis} engines={engines.current} onClose={() => setCompareOpen(false)} />}
       <div className="pointer-events-none absolute left-1/2 top-36 z-50 flex -translate-x-1/2 flex-col items-center gap-2" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className="rounded-xl border border-[#9a92d9]/25 bg-[#0a0521]/90 px-3 py-1.5 text-[12px] text-[#f1e9dd] backdrop-blur">{t.msg}</div>
@@ -91,8 +109,8 @@ export default function App() {
   );
 }
 
-function UniversePane({ meta, focused, solo, root, onFocus, register, toast, multiverse, labOpen, onCloseLab }: {
-  meta: UniMeta; focused: boolean; solo: boolean; root: HTMLDivElement | null; onFocus: () => void;
+function UniversePane({ meta, focused, hidden, solo, root, onFocus, register, toast, multiverse, labOpen, onCloseLab }: {
+  meta: UniMeta; focused: boolean; hidden: boolean; solo: boolean; root: HTMLDivElement | null; onFocus: () => void;
   register: (id: number, e: Engine | null) => void; toast: Toast; multiverse: Multiverse; labOpen: boolean; onCloseLab: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -126,23 +144,26 @@ function UniversePane({ meta, focused, solo, root, onFocus, register, toast, mul
       onFocus: () => focusRef.current(),
     }, physicsRef.current, meta.state);
     eng = e;
+    if (meta.live) e.setLive(true);
     setEngine(e);
     register(meta.id, e);
     return () => { register(meta.id, null); e.dispose(); setEngine(null); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { engine?.setActive(focused); }, [engine, focused]);
+  useEffect(() => { engine?.setSuspended(hidden); }, [engine, hidden]);
 
   useEffect(() => {
     physicsRef.current = physics;
-    if (meta.id !== 1) return; // only the original universe writes preferences
+    if (meta.id !== 1) return; // only the original sandbox universe writes preferences
     const t = setTimeout(() => savePhysics(physics), 400);
     return () => clearTimeout(t);
   }, [physics, meta.id]);
 
   const setPhysics = useCallback((p: Partial<PhysicsParams>) => {
-    setPhysicsState((prev) => ({ ...prev, ...p }));
     engine?.setPhysics(p);
+    if (engine) setPhysicsState({ ...engine.physics }); // the live universe ignores edits to its physics
+    else setPhysicsState((prev) => ({ ...prev, ...p }));
   }, [engine]);
   const setLaws = useCallback((l: Partial<Laws>) => {
     setLawsState((prev) => ({ ...prev, ...l }));
@@ -161,7 +182,7 @@ function UniversePane({ meta, focused, solo, root, onFocus, register, toast, mul
       {focused && root && createPortal(
         <Hud engine={engine} ctx={ctx} selected={selected} stats={stats} physics={physics} warping={warping}
           placing={placing} following={following} setPhysics={setPhysics} toast={toast}
-          universeName={meta.name} multiverse={multiverse} />, root)}
+          universeName={meta.name} multiverse={multiverse} live={!!meta.live} />, root)}
       {labOpen && root && createPortal(
         <Lab universeName={meta.name} laws={laws} physics={physics} setLaws={setLaws} setPhysics={setPhysics} onClose={onCloseLab} />, root)}
     </div>

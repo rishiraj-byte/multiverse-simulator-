@@ -42,6 +42,7 @@ export interface PhysicsParams {
   mapStructures: boolean; mapWeb: boolean; mapRings: boolean; mapCMB: boolean; mapDipole: boolean;
   mapReal: boolean;     // downloaded real catalogues (stars, galaxies, …)
   mapSimulated: boolean; // modelled components: dark matter, gas, dark energy
+  mapLive: boolean;     // real-time events: spacecraft, asteroid flybys, supernovae, black-hole mergers
   mapFlows: boolean;    // arrows: our motion vs the CMB, Great Attractor, disputed dark flow
   cmbPalette: string;   // 'deep' | 'planck' | 'infrared' | 'mono'
   cmbBrightness: number; // 0–1
@@ -70,7 +71,7 @@ export const DEFAULT_PHYSICS: PhysicsParams = {
   cosmicRate: 0.05,
   mapSolar: true, mapStars: true, mapMilkyWay: true, mapGalaxies: true,
   mapStructures: true, mapWeb: true, mapRings: true, mapCMB: true, mapDipole: false,
-  mapReal: true, mapSimulated: true, mapFlows: true,
+  mapReal: true, mapSimulated: true, mapFlows: true, mapLive: true,
   cmbPalette: 'deep',
   cmbBrightness: 0.28,
   fisheye: false,

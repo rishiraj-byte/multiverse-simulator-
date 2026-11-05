@@ -1,5 +1,6 @@
 // Browser-side access to public astronomy archives. All of these allow cross-origin
-// requests from a web page (verified Oct 2026): SIMBAD TAP (CDS), VizieR ASU (CDS),
+// requests from a web page (verified Oct 2026 for the main sites; mirrors are reached through
+// the desktop app's header hook): SIMBAD TAP (CDS), VizieR ASU (CDS),
 // GAVO Heidelberg TAP (Gaia DR3 mirror), GitHub raw (HYG database).
 
 export type Progress = (msg: string, frac?: number) => void;
@@ -49,16 +50,53 @@ export function parseCSV(text: string): { header: string[]; rows: string[][] } {
   return { header, rows };
 }
 
+// CDS (Strasbourg) runs SIMBAD and VizieR; official mirrors carry the same data. If the main
+// site is unreachable from the user's network, the first mirror that answers a tiny test
+// query is used for the rest of the session.
+const VIZIER_HOSTS = ['vizier.cds.unistra.fr', 'vizier.cfa.harvard.edu', 'vizier.iucaa.in', 'vizier.nao.ac.jp', 'vizier.idia.ac.za', 'vizier.china-vo.org'];
+const SIMBAD_HOSTS = ['simbad.cds.unistra.fr', 'simbad.harvard.edu', 'simbad.idia.ac.za'];
+const PROBE: Record<string, string> = {
+  vizier: '/viz-bin/asu-tsv?-source=I/239/hip_main&-out=HIP&-out.max=1',
+  simbad: '/simbad/sim-tap/sync?request=doQuery&lang=adql&format=csv&query=' + encodeURIComponent('SELECT TOP 1 oid FROM basic'),
+};
+const chosen = new Map<string, Promise<string>>();
+const failed = new Set<string>();
+
+async function choose(group: string, hosts: string[]): Promise<string> {
+  const live = hosts.filter((h) => !failed.has(h));
+  const ok = live.map((h) => fetch(`https://${h}${PROBE[group]}`, { signal: AbortSignal.timeout(12000) }).then((r) => r.ok, () => false));
+  for (let i = 0; i < live.length; i++) if (await ok[i]) return live[i]; // keep the preferred order
+  throw new Error(`${group === 'vizier' ? 'VizieR' : 'SIMBAD'} (CDS) and its mirrors are unreachable from this network right now — try again later`);
+}
+function mirror(group: 'vizier' | 'simbad'): Promise<string> {
+  let p = chosen.get(group);
+  if (!p) {
+    p = choose(group, group === 'vizier' ? VIZIER_HOSTS : SIMBAD_HOSTS);
+    chosen.set(group, p);
+    p.catch(() => chosen.delete(group));
+  }
+  return p;
+}
+/** Run a request against the chosen mirror; on a network failure, drop that mirror and try the next once. */
+async function viaMirror<T>(group: 'vizier' | 'simbad', run: (host: string) => Promise<T>): Promise<T> {
+  const host = await mirror(group);
+  try { return await run(host); } catch (e) {
+    if (!(e instanceof TypeError)) throw e; // HTTP errors are real answers; TypeError = could not connect
+    failed.add(host); chosen.delete(group);
+    return run(await mirror(group));
+  }
+}
 /** VizieR ASU-TSV rows as records. Adds decimal J2000 _RAJ2000/_DEJ2000 columns. */
 export async function vizier(source: string, cols: string[], constraints: Record<string, string> = {}, onProgress?: Progress): Promise<Record<string, string>[]> {
   const params = new URLSearchParams({ '-source': source, '-out': cols.join(','), '-out.add': '_RAJ,_DEJ', '-oc.form': 'dec', '-out.max': 'unlimited' });
   for (const [k, v] of Object.entries(constraints)) params.set(k, v);
-  let text = await fetchText(`https://vizier.cds.unistra.fr/viz-bin/asu-tsv?${params}`, onProgress, `VizieR ${source}`);
+  const get = () => viaMirror('vizier', (h) => fetchText(`https://${h}/viz-bin/asu-tsv?${params}`, onProgress, `VizieR ${source}`));
+  let text = await get();
   let lines = text.split('\n').filter((l) => l && !l.startsWith('#'));
   if (lines.length < 3) {
     // a column name not in this catalogue makes VizieR refuse the query: retry asking for every column
     params.delete('-out'); params.set('-out.all', '1');
-    text = await fetchText(`https://vizier.cds.unistra.fr/viz-bin/asu-tsv?${params}`, onProgress, `VizieR ${source}`);
+    text = await get();
     lines = text.split('\n').filter((l) => l && !l.startsWith('#'));
   }
   if (lines.length < 3) throw new Error(`VizieR returned no rows for ${source}`);
@@ -85,8 +123,8 @@ export async function vizier(source: string, cols: string[], constraints: Record
 
 /** SIMBAD TAP (synchronous ADQL). */
 export async function simbad(adql: string, onProgress?: Progress): Promise<Record<string, string>[]> {
-  const u = 'https://simbad.cds.unistra.fr/simbad/sim-tap/sync?request=doQuery&lang=adql&format=csv&MAXREC=2000000&query=' + encodeURIComponent(adql);
-  const { header, rows } = parseCSV(await fetchText(u, onProgress, 'SIMBAD'));
+  const q = '/simbad/sim-tap/sync?request=doQuery&lang=adql&format=csv&MAXREC=2000000&query=' + encodeURIComponent(adql);
+  const { header, rows } = parseCSV(await viaMirror('simbad', (h) => fetchText(`https://${h}${q}`, onProgress, h.includes('cds') ? 'SIMBAD' : `SIMBAD (mirror ${h})`)));
   return rows.map((r) => Object.fromEntries(header.map((h, k) => [h, r[k] ?? ''])));
 }
 
